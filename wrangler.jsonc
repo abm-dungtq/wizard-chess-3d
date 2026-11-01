@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wizard-chess-3d",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-23",
+  "observability": {
+    "enabled": true
+  },
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "chess.tqd.io.vn",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS"
+  }
+}
