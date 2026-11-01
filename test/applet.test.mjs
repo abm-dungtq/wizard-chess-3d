@@ -1383,4 +1383,43 @@ test('Mobile Anti-OOM & Zero-Leak GPU/WebAudio Contract (Shared Highlight/Tactic
   );
 });
 
+test('Outer Sanctum Amphitheater & 8 Theme-Reactive Guardian Monument Archetypes Contract', () => {
+  const engineJs = fs.readFileSync(path.join(ROOT, 'src/wizardChessEngine.js'), 'utf-8');
+
+  assert.ok(
+    engineJs.includes('function buildSanctumOuterArena(') &&
+      engineJs.includes('function resolveOuterMonumentArchetype(themeId)') &&
+      engineJs.includes('BRAZIER_FLAME_PALETTES') &&
+      engineJs.includes('sanctumPerimeterMotesUniforms'),
+    'Engine must build the outer Sanctum amphitheater, sunken moat, GPU perimeter motes, and theme-synced brazier palettes'
+  );
+
+  for (const archetype of [
+    'hogwarts',
+    'dong_son',
+    'shogun_yokai',
+    'mecha_ronin',
+    'abyssal_lich',
+    'valhalla_valkyrie',
+    'pharaoh_anubis',
+    'bauhaus_imperial'
+  ]) {
+    assert.ok(
+      engineJs.includes(`'${archetype}'`) && engineJs.includes(`${archetype}: {`),
+      `Outer arena must define monument archetype and brazier flame palette for "${archetype}"`
+    );
+  }
+
+  const updateThemeBlock = engineJs.slice(
+    engineJs.indexOf('function updateSanctumAltarTheme(theme)'),
+    engineJs.indexOf('function applyPieceTheme(themeId')
+  );
+  assert.ok(
+    !updateThemeBlock.includes('new THREE.') &&
+      updateThemeBlock.includes('grp.visible = key === archetype;'),
+    'updateSanctumAltarTheme must toggle pre-merged monument visibility with zero Three.js object/geometry allocations'
+  );
+});
+
+
 

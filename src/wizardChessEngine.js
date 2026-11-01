@@ -1461,23 +1461,141 @@ export function initWizardChess() {
       root.updateMatrixWorld(true);
     }
 
-    // Sanctum Arena Altar dynamic materials & floating sentinel crystals
+    // Sanctum Arena Altar & Outer Perimeter Amphitheater dynamic materials & floating sentinel crystals
     let sanctumRuneRingMat = null;
     let sanctumMoatGlowMat = null;
     let sanctumLightSqMat = null;
     let sanctumDarkSqMat = null;
+    let sanctumOuterStoneMat = null;
+    let sanctumOuterTrimMat = null;
+    let sanctumOuterGlowMat = null;
+    let sanctumPerimeterMotesUniforms = null;
+    let currentOuterMonumentArchetype = 'hogwarts';
+    const outerMonumentGroupsByTheme = {};
     const sanctumRelicCrystals = [];
+    const sanctumOuterFloatingRelics = [];
+
+    function resolveOuterMonumentArchetype(themeId) {
+      switch (themeId) {
+        case 'dong_son':
+        case 'jade':
+          return 'dong_son';
+        case 'shogun_yokai':
+          return 'shogun_yokai';
+        case 'mecha_ronin':
+          return 'mecha_ronin';
+        case 'abyssal_lich':
+        case 'slytherin':
+          return 'abyssal_lich';
+        case 'valhalla_valkyrie':
+        case 'astral':
+          return 'valhalla_valkyrie';
+        case 'pharaoh_anubis':
+          return 'pharaoh_anubis';
+        case 'bauhaus_imperial':
+          return 'bauhaus_imperial';
+        case 'hogwarts':
+        case 'royal':
+        default:
+          return 'hogwarts';
+      }
+    }
+
+    const BRAZIER_FLAME_PALETTES = {
+      hogwarts: {
+        light: 0xff9d3b,
+        coreSprite: 0xffb866,
+        haloSprite: 0xff8524,
+        layers: [
+          { base: [1.35, 0.96, 0.42], mid: [1.18, 0.62, 0.14], tip: [0.92, 0.30, 0.05] },
+          { base: [1.18, 0.72, 0.22], mid: [1.02, 0.40, 0.07], tip: [0.68, 0.14, 0.02] },
+          { base: [0.95, 0.45, 0.09], mid: [0.76, 0.20, 0.03], tip: [0.38, 0.05, 0.01] }
+        ]
+      },
+      dong_son: {
+        light: 0xf59e0b,
+        coreSprite: 0xfcd34d,
+        haloSprite: 0xd97706,
+        layers: [
+          { base: [1.42, 1.08, 0.45], mid: [1.26, 0.74, 0.16], tip: [0.96, 0.36, 0.06] },
+          { base: [1.24, 0.82, 0.25], mid: [1.08, 0.48, 0.08], tip: [0.74, 0.18, 0.03] },
+          { base: [1.02, 0.54, 0.12], mid: [0.82, 0.26, 0.04], tip: [0.42, 0.08, 0.01] }
+        ]
+      },
+      shogun_yokai: {
+        light: 0xff3b30,
+        coreSprite: 0xff6b6b,
+        haloSprite: 0xdc2626,
+        layers: [
+          { base: [1.45, 0.78, 0.42], mid: [1.32, 0.28, 0.18], tip: [0.95, 0.06, 0.12] },
+          { base: [1.28, 0.45, 0.22], mid: [1.10, 0.14, 0.12], tip: [0.72, 0.03, 0.08] },
+          { base: [0.98, 0.22, 0.12], mid: [0.78, 0.08, 0.08], tip: [0.40, 0.01, 0.04] }
+        ]
+      },
+      mecha_ronin: {
+        light: 0x00f5d4,
+        coreSprite: 0x67e8f9,
+        haloSprite: 0x06b6d4,
+        layers: [
+          { base: [0.75, 1.45, 1.42], mid: [0.12, 1.18, 1.28], tip: [0.88, 0.15, 0.65] },
+          { base: [0.42, 1.25, 1.32], mid: [0.08, 0.92, 1.15], tip: [0.68, 0.10, 0.52] },
+          { base: [0.18, 0.95, 1.10], mid: [0.05, 0.58, 0.85], tip: [0.42, 0.05, 0.35] }
+        ]
+      },
+      abyssal_lich: {
+        light: 0x10b981,
+        coreSprite: 0x6ee7b7,
+        haloSprite: 0x059669,
+        layers: [
+          { base: [0.72, 1.42, 0.95], mid: [0.14, 1.15, 0.68], tip: [0.55, 0.18, 0.88] },
+          { base: [0.45, 1.22, 0.78], mid: [0.08, 0.88, 0.52], tip: [0.42, 0.12, 0.68] },
+          { base: [0.20, 0.92, 0.55], mid: [0.04, 0.55, 0.34], tip: [0.26, 0.06, 0.45] }
+        ]
+      },
+      valhalla_valkyrie: {
+        light: 0x38bdf8,
+        coreSprite: 0xbae6fd,
+        haloSprite: 0x0284c7,
+        layers: [
+          { base: [0.95, 1.38, 1.48], mid: [0.28, 0.96, 1.38], tip: [0.95, 0.78, 0.22] },
+          { base: [0.65, 1.18, 1.38], mid: [0.18, 0.76, 1.22], tip: [0.72, 0.58, 0.16] },
+          { base: [0.35, 0.88, 1.18], mid: [0.10, 0.52, 0.92], tip: [0.45, 0.35, 0.08] }
+        ]
+      },
+      pharaoh_anubis: {
+        light: 0xfbbf24,
+        coreSprite: 0xfde68a,
+        haloSprite: 0xd97706,
+        layers: [
+          { base: [1.48, 1.18, 0.52], mid: [1.30, 0.82, 0.18], tip: [0.14, 0.68, 0.96] },
+          { base: [1.28, 0.92, 0.28], mid: [1.12, 0.56, 0.10], tip: [0.10, 0.48, 0.78] },
+          { base: [1.05, 0.62, 0.14], mid: [0.85, 0.32, 0.05], tip: [0.06, 0.28, 0.52] }
+        ]
+      },
+      bauhaus_imperial: {
+        light: 0xfacc15,
+        coreSprite: 0xfef08a,
+        haloSprite: 0xca8a04,
+        layers: [
+          { base: [1.42, 1.25, 0.72], mid: [1.22, 0.92, 0.32], tip: [0.92, 0.56, 0.12] },
+          { base: [1.22, 1.02, 0.48], mid: [1.02, 0.68, 0.20], tip: [0.72, 0.38, 0.08] },
+          { base: [0.98, 0.76, 0.26], mid: [0.78, 0.45, 0.12], tip: [0.46, 0.20, 0.04] }
+        ]
+      }
+    };
 
     function updateSanctumAltarTheme(theme) {
       if (!theme) return;
+      const glowHex = theme.altarGlowColor || 0xd4af37;
+      const trimHex = theme.trim?.color || 0xd4af37;
       if (sanctumRuneRingMat) {
-        sanctumRuneRingMat.emissive.setHex(theme.altarGlowColor || 0xd4af37);
-        sanctumRuneRingMat.color.setHex(theme.trim?.color || 0xd4af37);
+        sanctumRuneRingMat.emissive.setHex(glowHex);
+        sanctumRuneRingMat.color.setHex(trimHex);
         sanctumRuneRingMat.needsUpdate = true;
       }
       if (sanctumMoatGlowMat) {
-        sanctumMoatGlowMat.color.setHex(theme.altarGlowColor || 0xd4af37);
-        sanctumMoatGlowMat.emissive.setHex(theme.altarGlowColor || 0xd4af37);
+        sanctumMoatGlowMat.color.setHex(glowHex);
+        sanctumMoatGlowMat.emissive.setHex(glowHex);
         sanctumMoatGlowMat.needsUpdate = true;
       }
       if (sanctumLightSqMat && theme.lightSqHex) {
@@ -1490,8 +1608,60 @@ export function initWizardChess() {
       }
       for (const cr of sanctumRelicCrystals) {
         if (cr.mesh && cr.mesh.material) {
-          cr.mesh.material.color.setHex(theme.altarGlowColor || 0xd4af37);
-          cr.mesh.material.emissive.setHex(theme.altarGlowColor || 0xd4af37);
+          cr.mesh.material.color.setHex(glowHex);
+          cr.mesh.material.emissive.setHex(glowHex);
+        }
+      }
+
+      // Sync Outer Perimeter Amphitheater & 8 Theme-Reactive Monument Archetypes (Δgeometries = 0)
+      const archetype = resolveOuterMonumentArchetype(theme.id);
+      currentOuterMonumentArchetype = archetype;
+      for (const [key, grp] of Object.entries(outerMonumentGroupsByTheme)) {
+        if (grp) {
+          grp.visible = key === archetype;
+        }
+      }
+      if (sanctumOuterStoneMat) {
+        sanctumOuterStoneMat.color.setHex(theme.darkSqHex || 0x181e2c);
+        sanctumOuterStoneMat.emissive.setHex(theme.black?.emissive || 0x080b12);
+        sanctumOuterStoneMat.emissiveIntensity = 0.16;
+        sanctumOuterStoneMat.needsUpdate = true;
+      }
+      if (sanctumOuterTrimMat) {
+        sanctumOuterTrimMat.color.setHex(trimHex);
+        sanctumOuterTrimMat.emissive.setHex(theme.trim?.emissive || glowHex);
+        sanctumOuterTrimMat.emissiveIntensity = Math.min(0.55, (theme.trim?.emissiveIntensity || 0.28) * 0.9);
+        sanctumOuterTrimMat.needsUpdate = true;
+      }
+      if (sanctumOuterGlowMat) {
+        sanctumOuterGlowMat.color.setHex(glowHex);
+        sanctumOuterGlowMat.emissive.setHex(glowHex);
+        sanctumOuterGlowMat.needsUpdate = true;
+      }
+      if (sanctumPerimeterMotesUniforms && sanctumPerimeterMotesUniforms.uColor) {
+        sanctumPerimeterMotesUniforms.uColor.value.setHex(glowHex);
+      }
+
+      // Sync Twin Cathedral Braziers ((±3.65, 0, 0)) flame shader & point lights to active theme
+      const flamePal = BRAZIER_FLAME_PALETTES[archetype] || BRAZIER_FLAME_PALETTES.hogwarts;
+      for (let i = 0; i < brazierFireUniforms.length; i++) {
+        const u = brazierFireUniforms[i];
+        const layerCfg = flamePal.layers[Math.min(i, flamePal.layers.length - 1)];
+        if (u && u.uBaseColor && u.uMidColor && u.uTipColor && layerCfg) {
+          u.uBaseColor.value.setRGB(...layerCfg.base);
+          u.uMidColor.value.setRGB(...layerCfg.mid);
+          u.uTipColor.value.setRGB(...layerCfg.tip);
+        }
+      }
+      for (let i = 0; i < brazierGlowSprites.length; i++) {
+        const sp = brazierGlowSprites[i];
+        if (sp && sp.material) {
+          sp.material.color.setHex(i % 2 === 0 ? flamePal.coreSprite : flamePal.haloSprite);
+        }
+      }
+      for (let i = 0; i < brazierLights.length; i++) {
+        if (brazierLights[i]) {
+          brazierLights[i].color.setHex(flamePal.light);
         }
       }
     }
@@ -1805,6 +1975,542 @@ export function initWizardChess() {
           phase: idx * 1.57
         });
       });
+
+      buildSanctumOuterArena(addStaticAltarMesh, darkObsidianPlinthMat, carvedAshlarStepMat);
+    }
+
+    function buildSanctumOuterArena(addStaticAltarMesh, darkObsidianPlinthMat, carvedAshlarStepMat) {
+      sanctumOuterStoneMat = new THREE.MeshStandardMaterial({
+        color: 0x1b2232,
+        roughness: 0.30,
+        metalness: 0.28,
+        emissive: 0x080b12,
+        emissiveIntensity: 0.16
+      });
+      sanctumOuterTrimMat = new THREE.MeshStandardMaterial({
+        color: 0xd4af37,
+        roughness: 0.20,
+        metalness: 0.90,
+        emissive: 0xd4af37,
+        emissiveIntensity: 0.30
+      });
+      sanctumOuterGlowMat = new THREE.MeshStandardMaterial({
+        color: 0xd4af37,
+        roughness: 0.14,
+        metalness: 0.85,
+        emissive: 0xd4af37,
+        emissiveIntensity: 0.88
+      });
+      const darkMoatBasinMat = new THREE.MeshStandardMaterial({
+        color: 0x070a10,
+        roughness: 0.20,
+        metalness: 0.38
+      });
+
+      const tmpMat4 = new THREE.Matrix4();
+      const tmpPos = new THREE.Vector3();
+      const tmpEuler = new THREE.Euler();
+      const tmpQuat = new THREE.Quaternion();
+      const tmpScale = new THREE.Vector3();
+
+      const pushPart = (bucket, baseGeo, x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) => {
+        const g = baseGeo.index ? baseGeo.toNonIndexed() : baseGeo.clone();
+        if (g.attributes.uv) g.deleteAttribute('uv');
+        if (g.attributes.uv1) g.deleteAttribute('uv1');
+        tmpPos.set(x, y, z);
+        tmpEuler.set(rx, ry, rz, 'XYZ');
+        tmpQuat.setFromEuler(tmpEuler);
+        tmpScale.set(sx, sy, sz);
+        tmpMat4.compose(tmpPos, tmpQuat, tmpScale);
+        g.applyMatrix4(tmpMat4);
+        bucket.push(g);
+      };
+
+      const pushLocalPart = (
+        bucket,
+        baseGeo,
+        originX,
+        originZ,
+        yaw,
+        lx,
+        ly,
+        lz,
+        rx = 0,
+        ry = 0,
+        rz = 0,
+        sx = 1,
+        sy = 1,
+        sz = 1
+      ) => {
+        const cosY = Math.cos(yaw);
+        const sinY = Math.sin(yaw);
+        const wx = originX + lx * cosY + lz * sinY;
+        const wz = originZ - lx * sinY + lz * cosY;
+        pushPart(bucket, baseGeo, wx, ly, wz, rx, yaw + ry, rz, sx, sy, sz);
+      };
+
+      const buildMergedStaticMesh = (bucket, mat, parentGroup, recvShadow = true) => {
+        if (!bucket.length) return null;
+        const merged = mergeGeometries(bucket, false);
+        for (const g of bucket) g.dispose();
+        bucket.length = 0;
+        if (!merged) return null;
+        merged.computeBoundingSphere();
+        const m = new THREE.Mesh(merged, mat);
+        m.castShadow = false;
+        m.receiveShadow = recvShadow;
+        m.raycast = () => {};
+        m.updateMatrix();
+        m.matrixAutoUpdate = false;
+        parentGroup.add(m);
+        return m;
+      };
+
+      // =======================================================================
+      // ZONE A (r = 2.65m .. 6.25m): Dark Mirror-Obsidian Moat Trench,
+      // Outer Sanctum Terrace, Ley-Lines, Octagonal Rim & 4 Causeway Bridges
+      // =======================================================================
+      const moatBasinGeo = new THREE.RingGeometry(2.65, 4.48, 32);
+      moatBasinGeo.rotateX(-Math.PI / 2);
+      addStaticAltarMesh(moatBasinGeo, darkMoatBasinMat, 0, 0.015, 0, 0, 0, 0, true);
+
+      const outerTerraceMat = new THREE.MeshStandardMaterial({
+        color: 0x0b0f18,
+        roughness: 0.28,
+        metalness: 0.30
+      });
+      const outerTerraceGeo = new THREE.RingGeometry(4.46, 6.28, 32);
+      outerTerraceGeo.rotateX(-Math.PI / 2);
+      addStaticAltarMesh(outerTerraceGeo, outerTerraceMat, 0, 0.018, 0, 0, 0, 0, true);
+
+      const zoneAStone = [];
+      const zoneATrim = [];
+      const zoneAGlow = [];
+
+      const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+      const cyl8Geo = new THREE.CylinderGeometry(1, 1, 1, 8);
+      const cyl12Geo = new THREE.CylinderGeometry(1, 1, 1, 12);
+      const cone4Geo = new THREE.ConeGeometry(1, 1, 4);
+      const cone8Geo = new THREE.ConeGeometry(1, 1, 8);
+      const octGeo = new THREE.OctahedronGeometry(1, 0);
+      const torusGeo = new THREE.TorusGeometry(1, 0.08, 8, 24);
+
+      // Concentric Arcane Ley-Line Rings in the sunken moat & outer sanctum terrace
+      for (const rRing of [3.08, 3.68, 4.28, 5.25, 6.08]) {
+        const rg = new THREE.RingGeometry(rRing - 0.022, rRing + 0.022, 32);
+        rg.rotateX(-Math.PI / 2);
+        pushPart(zoneAGlow, rg, 0, 0.024, 0);
+        rg.dispose();
+      }
+      // 8 Radial Ley-Line Conduits & Octagonal Amphitheater Rim Segments (r = 4.52m & outer curb r = 6.18m)
+      for (let i = 0; i < 8; i++) {
+        const ang = (i * Math.PI) / 4;
+        const midR = 3.54;
+        pushPart(
+          zoneAGlow,
+          boxGeo,
+          Math.sin(ang) * midR,
+          0.023,
+          Math.cos(ang) * midR,
+          0,
+          ang,
+          0,
+          0.045,
+          0.008,
+          1.62
+        );
+
+        const wallAng = ang + Math.PI / 8;
+        const wallR = 4.52;
+        const segLen = 2 * wallR * Math.tan(Math.PI / 8) * 1.02;
+        pushPart(
+          zoneAStone,
+          boxGeo,
+          Math.sin(wallAng) * wallR,
+          0.12,
+          Math.cos(wallAng) * wallR,
+          0,
+          wallAng,
+          0,
+          segLen,
+          0.24,
+          0.28
+        );
+        pushPart(
+          zoneATrim,
+          boxGeo,
+          Math.sin(wallAng) * (wallR - 0.08),
+          0.248,
+          Math.cos(wallAng) * (wallR - 0.08),
+          0,
+          wallAng,
+          0,
+          segLen * 0.98,
+          0.026,
+          0.065
+        );
+
+        const outerR = 6.16;
+        const outerSegLen = 2 * outerR * Math.tan(Math.PI / 8) * 1.02;
+        pushPart(
+          zoneAStone,
+          boxGeo,
+          Math.sin(wallAng) * outerR,
+          0.08,
+          Math.cos(wallAng) * outerR,
+          0,
+          wallAng,
+          0,
+          outerSegLen,
+          0.16,
+          0.24
+        );
+        pushPart(
+          zoneATrim,
+          boxGeo,
+          Math.sin(wallAng) * (outerR - 0.06),
+          0.168,
+          Math.cos(wallAng) * (outerR - 0.06),
+          0,
+          wallAng,
+          0,
+          outerSegLen * 0.98,
+          0.022,
+          0.055
+        );
+      }
+
+      // 4 Cardinal Ceremonial Causeway Bridges (North z=-3.56, South z=+3.56, East x=+3.56, West x=-3.56)
+      for (let i = 0; i < 4; i++) {
+        const yaw = (i * Math.PI) / 2;
+        const bx = Math.sin(yaw) * 3.56;
+        const bz = Math.cos(yaw) * 3.56;
+        pushLocalPart(zoneAStone, boxGeo, bx, bz, yaw, 0, 0.11, 0, 0, 0, 0, 1.24, 0.22, 1.78);
+        pushLocalPart(zoneAStone, boxGeo, bx, bz, yaw, 0, 0.23, 0, 0, 0, 0, 1.06, 0.04, 1.74);
+        for (const s of [-1, 1]) {
+          pushLocalPart(zoneAStone, boxGeo, bx, bz, yaw, s * 0.56, 0.26, 0, 0, 0, 0, 0.10, 0.10, 1.76);
+          pushLocalPart(zoneATrim, boxGeo, bx, bz, yaw, s * 0.56, 0.318, 0, 0, 0, 0, 0.065, 0.022, 1.76);
+          pushLocalPart(zoneAGlow, boxGeo, bx, bz, yaw, s * 0.44, 0.254, 0, 0, 0, 0, 0.028, 0.012, 1.68);
+        }
+      }
+
+      // 8 Perimeter Sentinel Pedestals on the Octagonal Rim (r = 4.52m) with floating arcane orbs
+      const sentinelCrystalGeo = new THREE.OctahedronGeometry(0.095, 0);
+      sentinelCrystalGeo.scale(0.88, 1.55, 0.88);
+      const sentinelOrbitGeo = new THREE.TorusGeometry(0.15, 0.014, 8, 24);
+
+      for (let i = 0; i < 8; i++) {
+        const ang = (i + 0.5) * (Math.PI / 4);
+        const px = Math.sin(ang) * 4.52;
+        const pz = Math.cos(ang) * 4.52;
+        pushPart(zoneAStone, cyl8Geo, px, 0.32, pz, 0, ang, 0, 0.22, 0.22, 0.22);
+        pushPart(zoneATrim, cyl8Geo, px, 0.44, pz, 0, ang, 0, 0.24, 0.032, 0.24);
+
+        const orbMesh = new THREE.Mesh(sentinelCrystalGeo, sanctumOuterGlowMat);
+        orbMesh.position.set(px, 0.68, pz);
+        orbMesh.raycast = () => {};
+        sanctumAltarGroup.add(orbMesh);
+
+        const ringMesh = new THREE.Mesh(sentinelOrbitGeo, sanctumOuterTrimMat);
+        ringMesh.position.set(px, 0.68, pz);
+        ringMesh.rotation.x = Math.PI * 0.32;
+        ringMesh.raycast = () => {};
+        sanctumAltarGroup.add(ringMesh);
+
+        sanctumOuterFloatingRelics.push({
+          mesh: orbMesh,
+          ring: ringMesh,
+          baseY: 0.68,
+          phase: i * 0.785
+        });
+      }
+
+      buildMergedStaticMesh(zoneAStone, sanctumOuterStoneMat, sanctumAltarGroup, true);
+      buildMergedStaticMesh(zoneATrim, sanctumOuterTrimMat, sanctumAltarGroup, false);
+      buildMergedStaticMesh(zoneAGlow, sanctumOuterGlowMat, sanctumAltarGroup, false);
+
+      // =======================================================================
+      // ZONE B (r = 4.55m .. 5.65m): 8 Pre-Merged Theme-Reactive Colossal
+      // Guardian Monument & Sanctum Portal Archetypes (Δgeometries = 0)
+      // Calibrated so the full Portal Crown (y = 1.35m..2.12m) sits 100% inside
+      // the visible upper viewport below the top HUD bar in Mobile Portrait & 3D Cam!
+      // =======================================================================
+      const portalEnds = [
+        { z: -4.88, yaw: 0 },
+        { z: 4.88, yaw: Math.PI }
+      ];
+      const guardianFlanks = [
+        { x: -2.18, z: -4.55, yaw: Math.atan2(2.18, 4.55) },
+        { x: 2.18, z: -4.55, yaw: Math.atan2(-2.18, 4.55) },
+        { x: -2.18, z: 4.55, yaw: Math.atan2(2.18, -4.55) },
+        { x: 2.18, z: 4.55, yaw: Math.atan2(-2.18, -4.55) }
+      ];
+      const outerPylons = [
+        { x: -3.58, z: -3.25, yaw: Math.atan2(3.58, 3.25) },
+        { x: 3.58, z: -3.25, yaw: Math.atan2(-3.58, 3.25) },
+        { x: -3.58, z: 3.25, yaw: Math.atan2(3.58, -3.25) },
+        { x: 3.58, z: 3.25, yaw: Math.atan2(-3.58, -3.25) }
+      ];
+
+      const ARCHETYPES = [
+        'hogwarts',
+        'dong_son',
+        'shogun_yokai',
+        'mecha_ronin',
+        'abyssal_lich',
+        'valhalla_valkyrie',
+        'pharaoh_anubis',
+        'bauhaus_imperial'
+      ];
+
+      for (const themeKey of ARCHETYPES) {
+        const tGroup = new THREE.Group();
+        tGroup.name = `OuterMonuments_${themeKey}`;
+        tGroup.visible = themeKey === currentOuterMonumentArchetype;
+        sanctumAltarGroup.add(tGroup);
+        outerMonumentGroupsByTheme[themeKey] = tGroup;
+
+        const mStone = [];
+        const mTrim = [];
+        const mGlow = [];
+
+        // 1. North & South Grand Sanctum Portals (x = 0, z = ±4.88m)
+        // Piers stand at x = ±1.34m; lintel & emblem crown sit at y = 1.32m..2.08m
+        for (const p of portalEnds) {
+          for (const s of [-1, 1]) {
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, s * 1.34, 0.18, 0, 0, 0, 0, 0.48, 0.34, 0.48);
+            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 1.34, 0.36, 0, 0, 0, 0, 0.52, 0.04, 0.52);
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, s * 1.34, 0.84, 0, 0, 0, 0, 0.32, 0.92, 0.32);
+            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 1.34, 1.32, 0, 0, 0, 0, 0.44, 0.06, 0.44);
+            pushLocalPart(mGlow, boxGeo, 0, p.z, p.yaw, s * 1.34, 0.84, 0.165, 0, 0, 0, 0.055, 0.80, 0.02);
+          }
+
+          if (themeKey === 'hogwarts') {
+            // Pointed Gothic Triforium Arch & Rose Tracery Wheel + Spire Finials
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.12, 0.16, 0.32);
+            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.48, 0, 0, 0, 0, 3.24, 0.045, 0.36);
+            for (const s of [-1, 1]) {
+              pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, s * 0.62, 1.72, 0, 0, 0, -s * 0.42, 1.36, 0.12, 0.24);
+              pushLocalPart(mTrim, cone8Geo, 0, p.z, p.yaw, s * 1.34, 1.76, 0, 0, 0, 0, 0.18, 0.65, 0.18);
+            }
+            pushLocalPart(mTrim, torusGeo, 0, p.z, p.yaw, 0, 1.72, 0, 0, 0, 0, 0.34, 0.34, 0.34);
+            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.72, 0, 0, 0, 0, 0.16, 0.26, 0.16);
+            pushLocalPart(mTrim, cone8Geo, 0, p.z, p.yaw, 0, 2.12, 0, 0, 0, 0, 0.14, 0.42, 0.14);
+          } else if (themeKey === 'dong_son') {
+            // Colossal Trống Đồng Ngọc Lũ Sun-Disc Tympanum & Sweeping Chim Lạc Wings
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.36, 0, 0, 0, 0, 3.25, 0.16, 0.30);
+            pushLocalPart(mTrim, cyl12Geo, 0, p.z, p.yaw, 0, 1.72, 0, Math.PI / 2, 0, 0, 0.52, 0.12, 0.52);
+            pushLocalPart(mGlow, torusGeo, 0, p.z, p.yaw, 0, 1.72, 0.07, 0, 0, 0, 0.38, 0.38, 0.38);
+            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.72, 0.09, 0, 0, 0, 0.18, 0.18, 0.10);
+            for (const s of [-1, 1]) {
+              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 0.98, 1.62, 0, 0, 0, s * 0.26, 0.96, 0.10, 0.14);
+              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 1.34, 1.78, 0, 0, 0, s * 0.40, 0.72, 0.08, 0.12);
+              pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, s * 1.34, 1.72, 0, 0, 0, 0, 0.14, 0.28, 0.14);
+            }
+          } else if (themeKey === 'shogun_yokai') {
+            // Grand Vermilion Myōjin Torii Gate (Nuki tie-beam + Curved Kasagi upper lintel + Shogun Crest)
+            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.16, 0, 0, 0, 0, 3.18, 0.11, 0.18);
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.48, 0, 0, 0, 0, 3.48, 0.14, 0.26);
+            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.58, 0, 0, 0, 0, 3.76, 0.10, 0.32);
+            for (const s of [-1, 1]) {
+              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 1.88, 1.66, 0, 0, 0, s * 0.26, 0.52, 0.10, 0.30);
+            }
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.32, 0, 0, 0, 0, 0.28, 0.30, 0.16);
+            pushLocalPart(mGlow, torusGeo, 0, p.z, p.yaw, 0, 1.84, 0, 0, 0, 0, 0.30, 0.30, 0.30);
+            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.84, 0, 0, 0, 0, 0.15, 0.22, 0.15);
+          } else if (themeKey === 'mecha_ronin') {
+            // Cyberpunk 2099 Hexagonal Neon Reactor Gantry & Holo-Rings
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.40, 0, 0, 0, 0, 3.16, 0.18, 0.30);
+            pushLocalPart(mGlow, boxGeo, 0, p.z, p.yaw, 0, 1.40, 0.16, 0, 0, 0, 2.90, 0.05, 0.04);
+            for (const s of [-1, 1]) {
+              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 0.96, 1.72, 0, 0, 0, s * 0.42, 1.12, 0.10, 0.18);
+              pushLocalPart(mGlow, boxGeo, 0, p.z, p.yaw, s * 1.34, 1.72, 0, 0, 0, 0, 0.12, 0.56, 0.12);
+            }
+            pushLocalPart(mGlow, torusGeo, 0, p.z, p.yaw, 0, 1.76, 0, 0, 0, 0, 0.38, 0.38, 0.38);
+            pushLocalPart(mTrim, octGeo, 0, p.z, p.yaw, 0, 1.76, 0, 0, 0, 0, 0.18, 0.18, 0.18);
+          } else if (themeKey === 'abyssal_lich') {
+            // Cửu U Necropolis Spiked Obsidian Arch & Floating Emerald Soul Nexus
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.10, 0.16, 0.30);
+            for (const s of [-1, 1]) {
+              pushLocalPart(mStone, cone4Geo, 0, p.z, p.yaw, s * 1.34, 1.82, 0, 0, Math.PI / 4, -s * 0.14, 0.22, 0.78, 0.22);
+              pushLocalPart(mStone, cone4Geo, 0, p.z, p.yaw, s * 0.65, 1.68, 0, 0, Math.PI / 4, -s * 0.36, 0.16, 0.66, 0.16);
+            }
+            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.78, 0, 0, 0, 0, 0.22, 0.38, 0.22);
+            pushLocalPart(mTrim, torusGeo, 0, p.z, p.yaw, 0, 1.78, 0, 0, 0, 0, 0.36, 0.36, 0.36);
+          } else if (themeKey === 'valhalla_valkyrie') {
+            // Asgardian Bifrost Runic Monolith Arch & Aurora Crystal Crown
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.14, 0.18, 0.32);
+            pushLocalPart(mTrim, torusGeo, 0, p.z, p.yaw, 0, 1.76, 0, 0, 0, 0, 0.42, 0.42, 0.42);
+            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.80, 0, 0, 0, 0, 0.18, 0.42, 0.18);
+            for (const s of [-1, 1]) {
+              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 0.88, 1.70, 0, 0, 0, s * 0.34, 0.96, 0.11, 0.16);
+              pushLocalPart(mGlow, cone8Geo, 0, p.z, p.yaw, s * 1.34, 1.76, 0, 0, 0, 0, 0.16, 0.68, 0.16);
+            }
+          } else if (themeKey === 'pharaoh_anubis') {
+            // Karnak Temple Pylon Cornice, Winged Solar Disc of Ra & Golden Pyramidion
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.24, 0.20, 0.36);
+            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.52, 0, 0, 0, 0, 3.44, 0.08, 0.42);
+            pushLocalPart(mGlow, cyl12Geo, 0, p.z, p.yaw, 0, 1.74, 0, Math.PI / 2, 0, 0, 0.26, 0.12, 0.26);
+            pushLocalPart(mTrim, cone4Geo, 0, p.z, p.yaw, 0, 2.08, 0, 0, Math.PI / 4, 0, 0.28, 0.38, 0.28);
+            for (const s of [-1, 1]) {
+              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 0.78, 1.72, 0, 0, 0, s * 0.14, 0.98, 0.10, 0.14);
+              pushLocalPart(mTrim, cone4Geo, 0, p.z, p.yaw, s * 1.34, 1.66, 0, 0, Math.PI / 4, 0, 0.26, 0.38, 0.26);
+            }
+          } else {
+            // Bauhaus Imperial Art Deco Stepped Sunburst Arch & Armillary Sphere
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.12, 0.16, 0.30);
+            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.52, 0, 0, 0, 0, 2.24, 0.14, 0.26);
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.66, 0, 0, 0, 0, 1.42, 0.14, 0.22);
+            pushLocalPart(mTrim, torusGeo, 0, p.z, p.yaw, 0, 1.88, 0, 0, 0, 0, 0.32, 0.32, 0.32);
+            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.88, 0, 0, 0, 0, 0.16, 0.16, 0.16);
+          }
+        }
+
+        // 2. 4 Flanking Colossal Guardian Monuments (x = ±2.18m, z = ±4.55m)
+        for (const g of guardianFlanks) {
+          pushLocalPart(mStone, cyl8Geo, g.x, g.z, g.yaw, 0, 0.16, 0, 0, 0, 0, 0.40, 0.32, 0.40);
+          pushLocalPart(mTrim, cyl8Geo, g.x, g.z, g.yaw, 0, 0.34, 0, 0, 0, 0, 0.42, 0.036, 0.42);
+          pushLocalPart(mStone, cyl8Geo, g.x, g.z, g.yaw, 0, 0.62, 0, 0, 0, 0, 0.30, 0.52, 0.30);
+
+          if (themeKey === 'hogwarts') {
+            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.18, 0, 0, 0, 0, 0.42, 0.64, 0.30);
+            pushLocalPart(mTrim, boxGeo, g.x, g.z, g.yaw, 0, 1.42, 0, 0, 0, 0, 0.58, 0.14, 0.34);
+            pushLocalPart(mStone, cyl8Geo, g.x, g.z, g.yaw, 0, 1.66, 0, 0, 0, 0, 0.16, 0.28, 0.16);
+            pushLocalPart(mTrim, cone4Geo, g.x, g.z, g.yaw, 0, 1.90, 0, 0, Math.PI / 4, 0, 0.18, 0.28, 0.18);
+            pushLocalPart(mTrim, boxGeo, g.x, g.z, g.yaw, 0, 1.16, 0.24, 0, 0, 0, 0.32, 0.05, 0.07);
+            pushLocalPart(mGlow, boxGeo, g.x, g.z, g.yaw, 0, 0.78, 0.24, 0, 0, 0, 0.05, 0.76, 0.03);
+          } else if (themeKey === 'dong_son') {
+            pushLocalPart(mStone, cyl8Geo, g.x, g.z, g.yaw, 0, 1.22, 0, 0, 0, 0, 0.24, 0.72, 0.24);
+            pushLocalPart(mTrim, cyl12Geo, g.x, g.z, g.yaw, 0, 1.68, 0, Math.PI / 2, 0, 0, 0.36, 0.10, 0.36);
+            pushLocalPart(mGlow, octGeo, g.x, g.z, g.yaw, 0, 1.68, 0.07, 0, 0, 0, 0.15, 0.15, 0.10);
+            pushLocalPart(mTrim, cone4Geo, g.x, g.z, g.yaw, 0, 2.08, 0, 0, 0, 0, 0.26, 0.48, 0.09);
+          } else if (themeKey === 'shogun_yokai') {
+            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.16, 0, 0, 0, 0, 0.38, 0.56, 0.32);
+            pushLocalPart(mGlow, boxGeo, g.x, g.z, g.yaw, 0, 1.54, 0, 0, 0, 0, 0.24, 0.26, 0.24);
+            pushLocalPart(mStone, cone4Geo, g.x, g.z, g.yaw, 0, 1.78, 0, 0, Math.PI / 4, 0, 0.48, 0.24, 0.48);
+            for (const s of [-1, 1]) {
+              pushLocalPart(mTrim, boxGeo, g.x, g.z, g.yaw, s * 0.26, 1.98, 0.08, 0, 0, s * 0.45, 0.40, 0.07, 0.05);
+            }
+          } else if (themeKey === 'mecha_ronin') {
+            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.26, 0, 0, 0, 0, 0.34, 0.86, 0.34);
+            pushLocalPart(mGlow, boxGeo, g.x, g.z, g.yaw, 0, 1.28, 0.18, 0, 0, 0, 0.08, 0.78, 0.04);
+            for (const s of [-1, 1]) {
+              pushLocalPart(mTrim, boxGeo, g.x, g.z, g.yaw, s * 0.28, 1.48, -0.04, 0, 0, s * 0.32, 0.36, 0.54, 0.07);
+            }
+            pushLocalPart(mGlow, torusGeo, g.x, g.z, g.yaw, 0, 1.88, 0, 0, 0, 0, 0.24, 0.24, 0.24);
+          } else if (themeKey === 'abyssal_lich') {
+            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.24, 0, 0, Math.PI / 4, 0, 0.30, 0.82, 0.30);
+            pushLocalPart(mStone, cone4Geo, g.x, g.z, g.yaw, 0, 1.84, 0, 0, Math.PI / 4, 0, 0.26, 0.44, 0.26);
+            pushLocalPart(mGlow, octGeo, g.x, g.z, g.yaw, 0, 2.18, 0, 0, 0, 0, 0.15, 0.26, 0.15);
+          } else if (themeKey === 'valhalla_valkyrie') {
+            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.22, 0, 0, 0, 0, 0.36, 0.76, 0.24);
+            pushLocalPart(mGlow, cone8Geo, g.x, g.z, g.yaw, 0, 1.84, 0, 0, 0, 0, 0.18, 0.68, 0.18);
+            for (const s of [-1, 1]) {
+              pushLocalPart(mGlow, cone8Geo, g.x, g.z, g.yaw, s * 0.20, 1.52, 0, 0, 0, -s * 0.28, 0.12, 0.48, 0.12);
+            }
+            pushLocalPart(mTrim, torusGeo, g.x, g.z, g.yaw, 0, 1.68, 0, 0, 0, 0, 0.26, 0.26, 0.26);
+          } else if (themeKey === 'pharaoh_anubis') {
+            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.32, 0, 0, 0, 0, 0.30, 0.96, 0.30);
+            pushLocalPart(mTrim, cone4Geo, g.x, g.z, g.yaw, 0, 1.98, 0, 0, Math.PI / 4, 0, 0.24, 0.38, 0.24);
+            pushLocalPart(mGlow, boxGeo, g.x, g.z, g.yaw, 0, 1.32, 0.16, 0, 0, 0, 0.05, 0.82, 0.02);
+          } else {
+            pushLocalPart(mStone, cyl12Geo, g.x, g.z, g.yaw, 0, 1.24, 0, 0, 0, 0, 0.22, 0.82, 0.22);
+            pushLocalPart(mTrim, torusGeo, g.x, g.z, g.yaw, 0, 1.84, 0, 0, 0, 0, 0.26, 0.26, 0.26);
+            pushLocalPart(mGlow, octGeo, g.x, g.z, g.yaw, 0, 1.84, 0, 0, 0, 0, 0.13, 0.13, 0.13);
+          }
+        }
+
+        // 3. 4 Outer Sanctum Pylons (x = ±3.58m, z = ±3.25m) framing wide 16:9 & diagonal views
+        for (const op of outerPylons) {
+          pushLocalPart(mStone, cyl8Geo, op.x, op.z, op.yaw, 0, 0.16, 0, 0, 0, 0, 0.32, 0.32, 0.32);
+          pushLocalPart(mStone, cyl8Geo, op.x, op.z, op.yaw, 0, 0.78, 0, 0, 0, 0, 0.20, 0.96, 0.20);
+          pushLocalPart(mTrim, cyl8Geo, op.x, op.z, op.yaw, 0, 1.30, 0, 0, 0, 0, 0.26, 0.05, 0.26);
+          pushLocalPart(mGlow, octGeo, op.x, op.z, op.yaw, 0, 1.56, 0, 0, 0, 0, 0.14, 0.24, 0.14);
+        }
+
+        buildMergedStaticMesh(mStone, sanctumOuterStoneMat, tGroup, true);
+        buildMergedStaticMesh(mTrim, sanctumOuterTrimMat, tGroup, false);
+        buildMergedStaticMesh(mGlow, sanctumOuterGlowMat, tGroup, false);
+      }
+
+      boxGeo.dispose();
+      cyl8Geo.dispose();
+      cyl12Geo.dispose();
+      cone4Geo.dispose();
+      cone8Geo.dispose();
+      octGeo.dispose();
+      torusGeo.dispose();
+
+      // =======================================================================
+      // ZONE C (r = 2.95m .. 6.65m): 1-Draw-Call GPU Atmospheric Perimeter Motes
+      // =======================================================================
+      const moteCount = 96;
+      const motePositions = new Float32Array(moteCount * 3);
+      const motePhases = new Float32Array(moteCount);
+      const moteScales = new Float32Array(moteCount);
+
+      for (let i = 0; i < moteCount; i++) {
+        const ang = (i / moteCount) * Math.PI * 2 + (i % 7) * 0.23;
+        const r = 2.98 + ((i * 37) % 100) * 0.036;
+        motePositions[i * 3] = Math.sin(ang) * r;
+        motePositions[i * 3 + 1] = 0.22 + ((i * 53) % 100) * 0.032;
+        motePositions[i * 3 + 2] = Math.cos(ang) * r;
+        motePhases[i] = (i * 1.37) % (Math.PI * 2);
+        moteScales[i] = 0.65 + ((i * 29) % 10) * 0.08;
+      }
+
+      const moteGeo = new THREE.BufferGeometry();
+      moteGeo.setAttribute('position', new THREE.BufferAttribute(motePositions, 3));
+      moteGeo.setAttribute('aPhase', new THREE.BufferAttribute(motePhases, 1));
+      moteGeo.setAttribute('aScale', new THREE.BufferAttribute(moteScales, 1));
+
+      sanctumPerimeterMotesUniforms = {
+        uTime: { value: 0 },
+        uColor: { value: new THREE.Color(0xd4af37) },
+        uPixelRatio: { value: currentActiveDpr }
+      };
+
+      const moteMat = new THREE.ShaderMaterial({
+        uniforms: sanctumPerimeterMotesUniforms,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        vertexShader: `
+          attribute float aPhase;
+          attribute float aScale;
+          uniform float uTime;
+          uniform float uPixelRatio;
+          varying float vAlpha;
+          void main() {
+            vec3 pos = position;
+            float cycle = fract(aPhase * 0.15915 + uTime * (0.08 + aScale * 0.025));
+            pos.y = 0.18 + cycle * 3.25;
+            pos.x += sin(uTime * 1.1 + aPhase) * 0.14;
+            pos.z += cos(uTime * 0.95 + aPhase * 1.3) * 0.14;
+            vAlpha = sin(cycle * 3.14159265) * 0.78;
+            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+            gl_PointSize = clamp((16.0 * aScale * uPixelRatio) / max(1.0, -mvPosition.z), 2.0, 22.0);
+            gl_Position = projectionMatrix * mvPosition;
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 uColor;
+          varying float vAlpha;
+          void main() {
+            vec2 uv = gl_PointCoord - vec2(0.5);
+            float d = length(uv);
+            if (d > 0.5) discard;
+            float glow = smoothstep(0.5, 0.05, d);
+            gl_FragColor = vec4(uColor * (1.15 + glow * 0.65), glow * vAlpha);
+          }
+        `
+      });
+
+      const motesPoints = new THREE.Points(moteGeo, moteMat);
+      motesPoints.raycast = () => {};
+      motesPoints.frustumCulled = false;
+      motesPoints.matrixAutoUpdate = false;
+      sanctumAltarGroup.add(motesPoints);
     }
 
     function buildChessBoardGrid() {
@@ -7704,6 +8410,9 @@ export function initWizardChess() {
         activeSkinBlack,
         sanctumAltarMeshCount: boardGroup.children.length,
         sanctumRelicCrystalsCount: sanctumRelicCrystals.length,
+        sanctumOuterArenaTheme: currentOuterMonumentArchetype,
+        sanctumOuterMonumentThemes: Object.keys(outerMonumentGroupsByTheme),
+        sanctumOuterFloatingRelicsCount: sanctumOuterFloatingRelics.length,
         telemetry: cameraTelemetry
       }),
       captureScreenshot: async (filename) => {
@@ -8145,6 +8854,21 @@ export function initWizardChess() {
         if (rc.ring) {
           rc.ring.rotation.z = elapsedTotal * 0.85 + rc.phase;
         }
+      }
+
+      // Levitate & rotate the 8 Outer Perimeter Sentinel Relics & advance GPU Perimeter Motes
+      for (let i = 0; i < sanctumOuterFloatingRelics.length; i++) {
+        const orc = sanctumOuterFloatingRelics[i];
+        if (orc.mesh) {
+          orc.mesh.position.y = orc.baseY + Math.sin(elapsedTotal * 1.9 + orc.phase) * 0.042;
+          orc.mesh.rotation.y = elapsedTotal * 0.95 + orc.phase;
+        }
+        if (orc.ring) {
+          orc.ring.rotation.z = elapsedTotal * 0.72 + orc.phase;
+        }
+      }
+      if (sanctumPerimeterMotesUniforms && sanctumPerimeterMotesUniforms.uTime) {
+        sanctumPerimeterMotesUniforms.uTime.value = elapsedTotal;
       }
 
       if (isAnimatingMove || activeMoveTweens.length > 0 || checkmateState.active) {
