@@ -54,6 +54,19 @@ export default function App() {
       <div id="canvas-container"></div>
 
       <div
+        id="piece-overhead-layer"
+        className="piece-overhead-layer"
+        aria-hidden="true"
+      ></div>
+
+      <div
+        id="piece-inspect-card"
+        className="piece-inspect-card"
+        role="status"
+        aria-live="polite"
+      ></div>
+
+      <div
         id="trainer-logo-watermark"
         className="trainer-logo-watermark"
         title="DũngTQ - AI Trainner"
@@ -267,6 +280,14 @@ export default function App() {
             🔒 Khóa Cam
           </button>
           <button
+            type="button"
+            className="hud-btn active"
+            id="btn-piece-labels"
+            title="Chuyển chế độ hiển thị Tên Quân Cờ trên đầu: Thông Minh (Vua, Hậu, Xe, Tượng, Mã) • Tất Cả (32 Quân) • Khi Chạm"
+          >
+            🏷️ Tên Quân: Thông Minh
+          </button>
+          <button
             className="hud-btn"
             id="btn-piece-skin"
             title="Đổi nhanh bộ cờ 3D (Đông Sơn, Shogun, Mecha 2099, Cửu U Lich, Valhalla, Pharaoh, Bauhaus, Cẩm Thạch)"
@@ -344,6 +365,14 @@ export default function App() {
             title="Khóa Camera Cố Định hoặc Mở Xoay 3D Tự Do"
           >
             🔒 Khóa
+          </button>
+          <button
+            type="button"
+            className="hud-btn mobile-dock-btn active"
+            id="btn-quick-labels"
+            title="Chuyển chế độ hiển thị Tên Quân Cờ trên đầu: Thông Minh (Hiện Vua, Hậu, Xe, Tượng, Mã) • Tất Cả (32 Quân) • Khi Chạm"
+          >
+            🏷️ Tên: Cờ Lớn
           </button>
           <button
             type="button"

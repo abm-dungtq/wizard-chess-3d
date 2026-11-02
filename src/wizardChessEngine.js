@@ -27,6 +27,67 @@ export function initWizardChess() {
     const BOARD_SQ_SIZE = 0.44;
     const PIECE_SCALE_FACTOR = 0.66;
     const BOARD_SURFACE_Y = 0.775;
+    const ROLE_SCALE_MULTIPLIERS = {
+      pawn: 0.85,
+      knight: 0.96,
+      bishop: 0.98,
+      rook: 1.02,
+      queen: 1.08,
+      king: 1.15
+    };
+    function getPieceWorldScale(type) {
+      return BOARD_SQ_SIZE * PIECE_SCALE_FACTOR * (ROLE_SCALE_MULTIPLIERS[type] || 1.0);
+    }
+    const PIECE_ROLE_METADATA = {
+      pawn: {
+        viName: 'Tốt',
+        enName: 'Pawn',
+        shortVi: 'Tốt',
+        glyphW: '♙',
+        glyphB: '♟',
+        moveHint: 'Đi thẳng 1 ô (nước đầu 2 ô), ăn chéo 1 ô'
+      },
+      rook: {
+        viName: 'Xe',
+        enName: 'Rook',
+        shortVi: 'Xe',
+        glyphW: '♖',
+        glyphB: '♜',
+        moveHint: 'Đi ngang và dọc không giới hạn số ô'
+      },
+      knight: {
+        viName: 'Mã',
+        enName: 'Knight',
+        shortVi: 'Mã',
+        glyphW: '♘',
+        glyphB: '♞',
+        moveHint: 'Đi hình chữ L (2+1 ô), nhảy qua đầu quân khác'
+      },
+      bishop: {
+        viName: 'Tượng',
+        enName: 'Bishop',
+        shortVi: 'Tượng',
+        glyphW: '♗',
+        glyphB: '♝',
+        moveHint: 'Đi đường chéo không giới hạn số ô'
+      },
+      queen: {
+        viName: 'Hậu',
+        enName: 'Queen',
+        shortVi: 'Hậu',
+        glyphW: '♕',
+        glyphB: '♛',
+        moveHint: 'Đi ngang, dọc và chéo mọi khoảng cách'
+      },
+      king: {
+        viName: 'Vua',
+        enName: 'King',
+        shortVi: 'Vua',
+        glyphW: '♔',
+        glyphB: '♚',
+        moveHint: 'Đi 1 ô mọi hướng • Mất Vua là thua ván cờ'
+      }
+    };
     const PIECE_HEIGHTS = {
       pawn: 0.30,
       rook: 0.39,
@@ -1368,6 +1429,9 @@ export function initWizardChess() {
       if (pieceObj.hitbox) {
         newRoot.add(pieceObj.hitbox);
       }
+      if (pieceObj.pedestalRing) {
+        newRoot.add(pieceObj.pedestalRing);
+      }
 
       if (oldMixer) {
         if (typeof activeCombatMixers !== 'undefined') {
@@ -1422,7 +1486,7 @@ export function initWizardChess() {
 
       // Bind the 4 PBR material slots (Primary Body, Metallic Trim, Forged Steel, Emissive Gem/Visor Accent)
       root.traverse((child) => {
-        if (!child.isMesh || (child.userData && child.userData.isHitboxProxy)) {
+        if (!child.isMesh || (child.userData && (child.userData.isHitboxProxy || child.userData.isPedestalRing))) {
           return;
         }
         const nm = child.name || '';
@@ -1735,6 +1799,29 @@ export function initWizardChess() {
       return applyPieceTheme(nextId, 'both');
     }
 
+    // Shared Faction Pedestal Ring Geometry & Materials for instant White vs Black readability on all 64 squares (Δgeometries = 0)
+    const sharedPiecePedestalRingGeo = (() => {
+      const g = new THREE.RingGeometry(0.41, 0.52, 28);
+      g.rotateX(-Math.PI / 2);
+      g.translate(0, 0.015, 0);
+      g.userData = { isSharedPool: true };
+      return g;
+    })();
+    const sharedWhitePedestalRingMat = new THREE.MeshBasicMaterial({
+      color: 0xfff8e1,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.92,
+      userData: { isSharedPool: true }
+    });
+    const sharedBlackPedestalRingMat = new THREE.MeshBasicMaterial({
+      color: 0xd4af37,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.88,
+      userData: { isSharedPool: true }
+    });
+
     // Shared invisible CylinderGeometry hitbox proxies for O(1) piece raycasting (< 0.1ms vs 1.73M SkinnedMesh tris)
     const pieceHitboxMat = new THREE.MeshBasicMaterial({ visible: false });
     const pieceHitboxGeos = {};
@@ -1749,7 +1836,7 @@ export function initWizardChess() {
     function getPieceHitboxGeometry(type) {
       const key = PIECE_HITBOX_HEIGHTS[type] ? type : 'default';
       if (!pieceHitboxGeos[key]) {
-        const scale = BOARD_SQ_SIZE * PIECE_SCALE_FACTOR;
+        const scale = getPieceWorldScale(type);
         const worldH = PIECE_HITBOX_HEIGHTS[type] || 0.26;
         const localH = worldH / scale;
         const localTopR = 0.092 / scale;
@@ -2521,14 +2608,14 @@ export function initWizardChess() {
       sqGeo.computeBoundingBox();
       sqGeo.computeBoundingSphere();
       sanctumLightSqMat = new THREE.MeshStandardMaterial({
-        color: 0xe6decb,
-        roughness: 0.38,
-        metalness: 0.06
+        color: 0xefe7d6,
+        roughness: 0.44,
+        metalness: 0.04
       });
       sanctumDarkSqMat = new THREE.MeshStandardMaterial({
-        color: 0x232a3a,
-        roughness: 0.32,
-        metalness: 0.16
+        color: 0x181f2e,
+        roughness: 0.26,
+        metalness: 0.20
       });
 
       for (let r = 0; r < 8; r++) {
@@ -3494,7 +3581,7 @@ export function initWizardChess() {
 
       const worldPos = boardToWorld(r, c);
       root.position.copy(worldPos);
-      const scale = BOARD_SQ_SIZE * PIECE_SCALE_FACTOR;
+      const scale = getPieceWorldScale(type);
       root.scale.set(scale, scale, scale);
       // White (at +Z, r=6,7) faces -Z (Math.PI); Black (at -Z, r=0,1) faces +Z (0)
       root.rotation.y = color === 'w' ? Math.PI : 0;
@@ -3507,6 +3594,16 @@ export function initWizardChess() {
       hitboxProxy.receiveShadow = false;
       root.add(hitboxProxy);
 
+      const pedestalRing = new THREE.Mesh(
+        sharedPiecePedestalRingGeo,
+        color === 'w' ? sharedWhitePedestalRingMat : sharedBlackPedestalRingMat
+      );
+      pedestalRing.name = 'PiecePedestalRing';
+      pedestalRing.castShadow = false;
+      pedestalRing.receiveShadow = false;
+      pedestalRing.raycast = () => {};
+      root.add(pedestalRing);
+
       const pieceObj = {
         type,
         color,
@@ -3514,6 +3611,7 @@ export function initWizardChess() {
         c,
         mesh: root,
         hitbox: hitboxProxy,
+        pedestalRing,
         mixer,
         actions,
         currentAction: null,
@@ -3524,6 +3622,7 @@ export function initWizardChess() {
       };
 
       hitboxProxy.userData = { piece: pieceObj, isHitboxProxy: true };
+      pedestalRing.userData = { piece: pieceObj, isPedestalRing: true };
       if (mixer) {
         mixer.userData = { piece: pieceObj };
       }
@@ -3722,6 +3821,206 @@ export function initWizardChess() {
     let drawReason = null;
     let pendingPromotion = null; // { fromR, fromC, toR, toC, color } | null
     let activeCheckRingMesh = null;
+    // Steady 3D Combat Camera (disabled zoom-in/out by default to eliminate motion sickness & lag feel)
+    let combatCameraZoomEnabled = false;
+    // 3-Layer Piece Identification & Readability System ('smart' | 'all' | 'tap')
+    let pieceLabelMode = 'smart';
+    let inspectedSquare = null; // { r, c } | null
+    const overheadBadgeSlots = [];
+    const _overheadProjVec = new THREE.Vector3();
+
+    function initPieceOverheadLayer() {
+      const layer = document.getElementById('piece-overhead-layer');
+      if (!layer || overheadBadgeSlots.length === 32) return;
+      layer.innerHTML = '';
+      for (let i = 0; i < 32; i++) {
+        const el = document.createElement('div');
+        el.className = 'piece-overhead-badge faction-w';
+        el.style.opacity = '0';
+        el.style.transform = 'translate3d(-9999px, -9999px, 0)';
+        const glyphEl = document.createElement('span');
+        glyphEl.className = 'piece-overhead-glyph';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'piece-overhead-name';
+        el.appendChild(glyphEl);
+        el.appendChild(nameEl);
+        layer.appendChild(el);
+        overheadBadgeSlots.push({
+          el,
+          glyphEl,
+          nameEl,
+          lastGlyph: '',
+          lastName: '',
+          lastClass: 'piece-overhead-badge faction-w',
+          visible: false
+        });
+      }
+    }
+
+    function updatePieceLabelUI() {
+      const modeNames = {
+        smart: 'Thông Minh',
+        all: 'Tất Cả (32 Quân)',
+        tap: 'Khi Chạm'
+      };
+      const shortNames = {
+        smart: 'Cờ Lớn',
+        all: 'Tất Cả',
+        tap: 'Khi Chạm'
+      };
+      const btnLabels = document.getElementById('btn-piece-labels');
+      if (btnLabels) {
+        btnLabels.textContent = `🏷️ Tên Quân: ${modeNames[pieceLabelMode] || 'Thông Minh'}`;
+        btnLabels.classList.toggle('active', pieceLabelMode !== 'tap');
+      }
+      const btnQuickLabels = document.getElementById('btn-quick-labels');
+      if (btnQuickLabels) {
+        btnQuickLabels.textContent = `🏷️ Tên: ${shortNames[pieceLabelMode] || 'Cờ Lớn'}`;
+        btnQuickLabels.classList.toggle('active', pieceLabelMode !== 'tap');
+      }
+    }
+
+    function setPieceLabelMode(nextMode) {
+      if (nextMode === 'smart' || nextMode === 'all' || nextMode === 'tap') {
+        pieceLabelMode = nextMode;
+        updatePieceLabelUI();
+        updatePieceOverheadOverlay();
+      }
+      return pieceLabelMode;
+    }
+
+    function cyclePieceLabelMode() {
+      const order = ['smart', 'all', 'tap'];
+      const idx = order.indexOf(pieceLabelMode);
+      const nextMode = order[(idx + 1) % order.length];
+      return setPieceLabelMode(nextMode);
+    }
+
+    function updatePieceOverheadOverlay() {
+      if (overheadBadgeSlots.length < 32) {
+        initPieceOverheadLayer();
+      }
+      const layer = document.getElementById('piece-overhead-layer');
+      const inspectCard = document.getElementById('piece-inspect-card');
+      const uiHidden = document.body.classList.contains('cinematic-ui-hidden');
+      if (layer) {
+        layer.classList.toggle('combat-dim', Boolean(isAnimatingMove));
+      }
+      if (uiHidden || overheadBadgeSlots.length === 0) {
+        if (inspectCard) inspectCard.classList.remove('visible');
+        return;
+      }
+
+      const vw = window.innerWidth || 1280;
+      const vh = window.innerHeight || 800;
+      let slotIdx = 0;
+
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const p = boardState[r]?.[c];
+          if (!p || !p.mesh) continue;
+          const isSelected = Boolean(selectedSquare && selectedSquare.r === r && selectedSquare.c === c);
+          const isInspected = Boolean(inspectedSquare && inspectedSquare.r === r && inspectedSquare.c === c);
+          const isCaptureTarget = Boolean(
+            selectedSquare &&
+              validMoves.some(
+                (m) =>
+                  m.capture &&
+                  ((m.r === r && m.c === c) || (m.enPassant && m.captureR === r && m.captureC === c))
+              )
+          );
+
+          let shouldShow = false;
+          if (isSelected || isInspected || isCaptureTarget) {
+            shouldShow = true;
+          } else if (pieceLabelMode === 'all') {
+            shouldShow = true;
+          } else if (pieceLabelMode === 'smart') {
+            shouldShow = p.type !== 'pawn';
+          }
+
+          if (!shouldShow || slotIdx >= 32) continue;
+
+          const meta = PIECE_ROLE_METADATA[p.type] || PIECE_ROLE_METADATA.pawn;
+          const roleScale = ROLE_SCALE_MULTIPLIERS[p.type] || 1.0;
+          const worldHeadY =
+            p.mesh.position.y + (PIECE_HEIGHTS[p.type] || 0.38) * roleScale + (p.type === 'pawn' ? 0.065 : 0.095);
+          _overheadProjVec.set(p.mesh.position.x, worldHeadY, p.mesh.position.z);
+          _overheadProjVec.project(camera);
+
+          if (_overheadProjVec.z > 1.0 || _overheadProjVec.z < -1.0) continue;
+
+          const sx = (_overheadProjVec.x * 0.5 + 0.5) * vw;
+          const sy = (-_overheadProjVec.y * 0.5 + 0.5) * vh;
+          if (sx < 16 || sx > vw - 16 || sy < 44 || sy > vh - 44) continue;
+
+          const slot = overheadBadgeSlots[slotIdx++];
+          const glyphStr = isCaptureTarget
+            ? '⚔️'
+            : p.color === 'w'
+              ? meta.glyphW
+              : meta.glyphB;
+          const nameStr = isCaptureTarget
+            ? `${p.color === 'w' ? meta.glyphW : meta.glyphB} ${meta.shortVi}`
+            : meta.shortVi;
+          const cls = `piece-overhead-badge faction-${p.color}${
+            p.type === 'pawn' && !isSelected && !isInspected && !isCaptureTarget ? ' is-pawn-compact' : ''
+          }${isCaptureTarget ? ' is-capture-target' : isSelected ? ' is-selected' : isInspected ? ' is-inspected' : ''}`;
+
+          if (slot.lastGlyph !== glyphStr) {
+            slot.glyphEl.textContent = glyphStr;
+            slot.lastGlyph = glyphStr;
+          }
+          if (slot.lastName !== nameStr) {
+            slot.nameEl.textContent = nameStr;
+            slot.lastName = nameStr;
+          }
+          if (slot.lastClass !== cls) {
+            slot.el.className = cls;
+            slot.lastClass = cls;
+          }
+          slot.el.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -100%)`;
+          if (!slot.visible) {
+            slot.el.style.opacity = '1';
+            slot.visible = true;
+          }
+        }
+      }
+
+      for (let i = slotIdx; i < 32; i++) {
+        const slot = overheadBadgeSlots[i];
+        if (slot.visible) {
+          slot.el.style.opacity = '0';
+          slot.el.style.transform = 'translate3d(-9999px, -9999px, 0)';
+          slot.visible = false;
+        }
+      }
+
+      // Update Instant Floating Callout Card (#piece-inspect-card) on Click/Tap for both Friendly & Enemy Pieces
+      if (inspectCard) {
+        const activeSq = inspectedSquare || selectedSquare;
+        const inspectedPiece =
+          activeSq && !isAnimatingMove && !gameOver ? boardState[activeSq.r]?.[activeSq.c] : null;
+        if (inspectedPiece && inspectedPiece.mesh) {
+          const meta = PIECE_ROLE_METADATA[inspectedPiece.type] || PIECE_ROLE_METADATA.pawn;
+          const isFriendly = inspectedPiece.color === currentTurn;
+          const glyph = inspectedPiece.color === 'w' ? meta.glyphW : meta.glyphB;
+          const colorVi = inspectedPiece.color === 'w' ? 'TRẮNG' : 'ĐEN';
+          const tagText = isFriendly ? 'Quân Ta' : 'Quân Địch';
+          const files = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+          const sqCoord = `${files[activeSq.c] || 'A'}${8 - activeSq.r}`;
+          const nextHtml = `<div class="piece-inspect-header"><span class="piece-inspect-glyph">${glyph}</span><span>${meta.viName.toUpperCase()} ${colorVi} (${meta.enName}) • ${sqCoord}</span><span class="piece-inspect-tag">${tagText}</span></div><div class="piece-inspect-sub">${meta.moveHint}</div>`;
+          if (inspectCard.dataset.lastHtml !== nextHtml) {
+            inspectCard.innerHTML = nextHtml;
+            inspectCard.dataset.lastHtml = nextHtml;
+          }
+          inspectCard.classList.toggle('enemy-card', !isFriendly);
+          inspectCard.classList.add('visible');
+        } else {
+          inspectCard.classList.remove('visible');
+        }
+      }
+    }
 
     let checkmateState = {
       active: false,
@@ -3812,6 +4111,7 @@ export function initWizardChess() {
       clearAllPieces();
       clearSquareHighlights();
       selectedSquare = null;
+      inspectedSquare = null;
       validMoves = [];
       isAnimatingMove = false;
       currentTurn = snap.currentTurn;
@@ -3912,6 +4212,7 @@ export function initWizardChess() {
       clearAllPieces();
       clearSquareHighlights();
       selectedSquare = null;
+      inspectedSquare = null;
       validMoves = [];
       currentTurn = 'w';
       if (gameMode === 'single' && isPassAndPlay) {
@@ -4132,6 +4433,10 @@ export function initWizardChess() {
       color: 0xf5d76e,
       side: THREE.DoubleSide
     }));
+    const sharedEnemyInspectRingMat = markSharedPoolAsset(new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      side: THREE.DoubleSide
+    }));
 
     const sharedCapRingGeoDesktop = markSharedPoolAsset((() => {
       const g = new THREE.RingGeometry(BOARD_SQ_SIZE * 0.33, BOARD_SQ_SIZE * 0.45, 32);
@@ -4250,6 +4555,19 @@ export function initWizardChess() {
 
     function clearSquareHighlights() {
       clearGroupWithPoolSafety(squareHighlightsGroup);
+    }
+
+    function showEnemyInspectHighlight(r, c) {
+      clearSquareHighlights();
+      const isTouchOrCompact = Boolean(
+        window.innerWidth <= 768 || window.matchMedia?.('(pointer: coarse)')?.matches
+      );
+      const selGeo = isTouchOrCompact ? sharedSelRingGeoMobile : sharedSelRingGeoDesktop;
+      const inspectMesh = new THREE.Mesh(selGeo, sharedEnemyInspectRingMat);
+      inspectMesh.raycast = () => {};
+      const pos = boardToWorld(r, c);
+      inspectMesh.position.set(pos.x, BOARD_SURFACE_Y + 0.011, pos.z);
+      squareHighlightsGroup.add(inspectMesh);
     }
 
     function showSquareHighlights(r, c, moves) {
@@ -4829,8 +5147,10 @@ export function initWizardChess() {
       activeCamTransition = null;
       clearSquareHighlights();
       selectedSquare = null;
+      inspectedSquare = null;
       validMoves = [];
       syncActionButtonsUI();
+      updatePieceOverheadOverlay();
 
       // Broadcast to multiplayer room (cloud API + static BroadcastChannel/localStorage fallback)
       if (gameMode === 'multi' && roomCode && !options.fromRemote) {
@@ -4854,7 +5174,8 @@ export function initWizardChess() {
       const moveHeading = Math.atan2(dx, dz);
       const homeRotY = piece.color === 'w' ? Math.PI : 0;
       const startRotY = piece.mesh ? piece.mesh.rotation.y : homeRotY;
-      const basePieceScale = BOARD_SQ_SIZE * PIECE_SCALE_FACTOR;
+      const basePieceScale = getPieceWorldScale(piece.type);
+      const defenderBaseScale = captured ? getPieceWorldScale(captured.type) : basePieceScale;
       const gaitProfile = LOCOMOTION_GAIT_PROFILES[piece.type] || LOCOMOTION_GAIT_PROFILES.queen;
       const atkProfile = ATTACK_SYNC_PROFILES[piece.type] || ATTACK_SYNC_PROFILES.queen;
 
@@ -5081,6 +5402,7 @@ export function initWizardChess() {
         !scriptedGameActive &&
         isPlayerCamPresetActive;
       const useDuelCamSwoop = !isCameraLocked;
+      const activeDuelCamSwoop = useDuelCamSwoop && combatCameraZoomEnabled;
       const nextZSign = nextTurnColor === 'b' ? -1 : 1;
       const returnCamPos = shouldAutoFlip2P
         ? new THREE.Vector3(0, 3.82, nextZSign * 3.58)
@@ -5207,7 +5529,13 @@ export function initWizardChess() {
       const tImpact = isCapture ? (tApproach + BLOW_CLIP_TIME / atkProfile.timeScale) : stdMoveDuration;
       const tStrikeDone = isCapture ? (tImpact + 0.48) : stdMoveDuration;
       const camReturnDist = returnCamPos.distanceTo(duelCamClose);
-      const returnDuration = isCapture ? Number((1.18 + Math.min(0.42, camReturnDist * 0.10)).toFixed(3)) : 0;
+      const returnDuration = isCapture
+        ? activeDuelCamSwoop
+          ? Number((1.18 + Math.min(0.42, camReturnDist * 0.10)).toFixed(3))
+          : shouldAutoFlip2P
+            ? 0.72
+            : 0.36
+        : 0;
       const totalDuration = isCapture ? (tStrikeDone + returnDuration) : stdMoveDuration;
       wizardAudio.playMoveSlide(stdMoveDuration);
 
@@ -5272,7 +5600,7 @@ export function initWizardChess() {
           if (castleRook.mesh) {
             castleRook.mesh.position.copy(castleRookEndPos);
             castleRook.mesh.rotation.set(0, castleRook.color === 'w' ? Math.PI : 0, 0);
-            castleRook.mesh.scale.setScalar(basePieceScale);
+            castleRook.mesh.scale.setScalar(getPieceWorldScale('rook'));
           }
           playPieceClip(castleRook, 'Idle', true, 0.24);
         }
@@ -5384,10 +5712,10 @@ export function initWizardChess() {
           return false;
         }
 
-        // Capture Sequence with Continuous C-infinity Quadratic Bezier Camera (when Free 3D) or Steady Fixed View (when Locked)
+        // Capture Sequence with Steady Fixed View by default (no nauseating zoom-in/out!) or Optional C-infinity Bezier Swoop
         let phaseName = 'approach';
         if (elapsed <= tStrikeDone) {
-          if (useDuelCamSwoop) {
+          if (activeDuelCamSwoop) {
             // Single unbroken C-infinity camera arc across both approach and strike (never stops at tApproach!)
             const uActive = Math.min(1, elapsed / tStrikeDone);
             const sActive = 0.38 * uActive + 0.62 * easeInOutCubic(uActive);
@@ -5574,9 +5902,9 @@ export function initWizardChess() {
               );
               captured.mesh.rotation.set(defPitchX, defYaw, defRollZ);
               captured.mesh.scale.set(
-                basePieceScale * defScaleXZ,
-                basePieceScale * defScaleY,
-                basePieceScale * defScaleXZ
+                defenderBaseScale * defScaleXZ,
+                defenderBaseScale * defScaleY,
+                defenderBaseScale * defScaleXZ
               );
 
               const curSep = piece.mesh.position.distanceTo(captured.mesh.position);
@@ -5646,9 +5974,9 @@ export function initWizardChess() {
               postStrikePiecePos.copy(piece.mesh.position);
             }
 
-            // Piece-scaled impact camera tremor right when the blow shatters the defender (only in Free 3D mode)
+            // Piece-scaled impact camera tremor right when the blow shatters the defender (only when combatCameraZoomEnabled is explicitly opted in)
             const shakeSpan = piece.type === 'rook' || piece.type === 'king' ? 0.34 : 0.26;
-            if (useDuelCamSwoop && shatterTriggered && elapsed >= impactActualTime && elapsed <= impactActualTime + shakeSpan) {
+            if (activeDuelCamSwoop && shatterTriggered && elapsed >= impactActualTime && elapsed <= impactActualTime + shakeSpan) {
               const shakeProgress = (elapsed - impactActualTime) / shakeSpan;
               const decay = (1 - shakeProgress) * (1 - shakeProgress);
               const baseAmp = piece.type === 'rook' ? 0.046 : piece.type === 'king' ? 0.042 : 0.026;
@@ -5671,7 +5999,7 @@ export function initWizardChess() {
             lerpAngleShortest(moveHeading, homeRotY, settleTurnU),
             0
           );
-          if (useDuelCamSwoop) {
+          if (activeDuelCamSwoop) {
             camera.position.lerpVectors(duelCamClose, returnCamPos, easeRet);
             orbitControls.target.lerpVectors(duelTargetEnd, returnTarget, easeRet);
           } else if (shouldAutoFlip2P) {
@@ -6587,8 +6915,8 @@ export function initWizardChess() {
       const tiltAxis = new THREE.Vector3(fallDirZ, 0, -fallDirX).normalize();
       const qTilt = new THREE.Quaternion();
 
-      // Smoothly frame the checkmate on the board only when Free 3D Cam is unlocked
-      if (!isCameraLocked && heldCameraKeys.size === 0) {
+      // Smoothly frame the checkmate on the board only when Free 3D Cam is unlocked AND combatCameraZoomEnabled is opted in
+      if (!isCameraLocked && combatCameraZoomEnabled && heldCameraKeys.size === 0) {
         const camSideX = homePos.x >= 0 ? -1.35 : 1.35;
         const camSideZ = homePos.z + forwardDirZ * 1.45;
         smoothCameraTo(
@@ -6673,8 +7001,8 @@ export function initWizardChess() {
           const theta = MAX_FALL_RAD - Math.abs(Math.sin(uBounce * Math.PI * 2.0)) * bounceAmp;
           applyKingTopplePose(theta, 0);
 
-          // Subtle damped camera tremor when the heavy stone King crashes onto the altar board
-          if (elapsed <= tImpact + 0.28) {
+          // Subtle damped camera tremor when the heavy stone King crashes onto the altar board (only when combatCameraZoomEnabled is opted in)
+          if (combatCameraZoomEnabled && elapsed <= tImpact + 0.28) {
             const sProg = (elapsed - tImpact) / 0.28;
             const decay = (1 - sProg) * (1 - sProg);
             camera.position.y += Math.cos(sProg * Math.PI * 8) * 0.022 * decay;
@@ -6876,7 +7204,9 @@ export function initWizardChess() {
           capturedTray.textContent = '';
         }
       }
+      updatePieceLabelUI();
       syncActionButtonsUI();
+      updatePieceOverheadOverlay();
     }
 
     // =========================================================================
@@ -7057,7 +7387,7 @@ export function initWizardChess() {
         }
       }
 
-      // Stage 3: Touch Friendly-Piece Selection Magnetic Assist (24px tolerance when tapping slightly beside a friendly piece)
+      // Stage 3: Touch Piece Selection & Enemy-Inspect Magnetic Assist (24px tolerance when tapping slightly beside any piece)
       if (!selectedSquare && clickedR === -1 && isTouchEvent) {
         let bestPieceR = -1;
         let bestPieceC = -1;
@@ -7065,10 +7395,11 @@ export function initWizardChess() {
         for (let r = 0; r < 8; r++) {
           for (let c = 0; c < 8; c++) {
             const p = boardState[r][c];
-            if (p && p.color === currentTurn) {
+            if (p) {
               const sc = projectBoardSquareToScreen(r, c, rect);
-              const dPx = Math.hypot(e.clientX - sc.x, e.clientY - sc.y);
-              if (dPx <= bestPieceDistPx) {
+              const rawDist = Math.hypot(e.clientX - sc.x, e.clientY - sc.y);
+              const dPx = p.color === currentTurn ? Math.max(0, rawDist - 3) : rawDist;
+              if (rawDist <= 24 && dPx <= bestPieceDistPx) {
                 bestPieceDistPx = dPx;
                 bestPieceR = r;
                 bestPieceC = c;
@@ -7086,7 +7417,9 @@ export function initWizardChess() {
         if (preMoveHighlightTask) preMoveHighlightTask = null;
         clearSquareHighlights();
         selectedSquare = null;
+        inspectedSquare = null;
         validMoves = [];
+        updatePieceOverheadOverlay();
         return;
       }
 
@@ -7124,12 +7457,28 @@ export function initWizardChess() {
           triggerTouchHaptic(8);
         }
         selectedSquare = { r: clickedR, c: clickedC };
+        inspectedSquare = { r: clickedR, c: clickedC };
         validMoves = getLegalMovesForPiece(clickedR, clickedC);
         showSquareHighlights(clickedR, clickedC, validMoves);
-      } else {
+        updatePieceOverheadOverlay();
+      } else if (clickedPiece) {
+        // Clicked an enemy piece (not a legal capture target for current selectedSquare):
+        // Inspect this enemy piece so new players immediately see its name, role, and move hint!
+        if (isTouchEvent) {
+          triggerTouchHaptic(6);
+        }
         clearSquareHighlights();
         selectedSquare = null;
         validMoves = [];
+        inspectedSquare = { r: clickedR, c: clickedC };
+        showEnemyInspectHighlight(clickedR, clickedC);
+        updatePieceOverheadOverlay();
+      } else {
+        clearSquareHighlights();
+        selectedSquare = null;
+        inspectedSquare = null;
+        validMoves = [];
+        updatePieceOverheadOverlay();
       }
     });
 
@@ -7698,6 +8047,12 @@ export function initWizardChess() {
     document.getElementById('btn-quick-lock')?.addEventListener('click', () => {
       setCameraLocked(!isCameraLocked);
     });
+    document.getElementById('btn-piece-labels')?.addEventListener('click', () => {
+      cyclePieceLabelMode();
+    });
+    document.getElementById('btn-quick-labels')?.addEventListener('click', () => {
+      cyclePieceLabelMode();
+    });
     document.getElementById('btn-quick-cam')?.addEventListener('click', () => {
       const isTopActive = document.getElementById('btn-cam-top')?.classList.contains('active');
       if (isTopActive) {
@@ -8175,6 +8530,55 @@ export function initWizardChess() {
       PIECE_THEME_ORDER,
       ATTACK_SYNC_PROFILES,
       LOCOMOTION_GAIT_PROFILES,
+      ROLE_SCALE_MULTIPLIERS,
+      PIECE_ROLE_METADATA,
+      setCombatCameraZoomEnabled: (enabled) => {
+        combatCameraZoomEnabled = Boolean(enabled);
+        return combatCameraZoomEnabled;
+      },
+      isCombatCameraZoomEnabled: () => combatCameraZoomEnabled,
+      setPieceLabelMode,
+      cyclePieceLabelMode,
+      getPieceLabelMode: () => pieceLabelMode,
+      inspectSquare: (r, c) => {
+        if (typeof r !== 'number' || typeof c !== 'number' || r < 0 || r > 7 || c < 0 || c > 7) {
+          clearSquareHighlights();
+          selectedSquare = null;
+          inspectedSquare = null;
+          validMoves = [];
+          updatePieceOverheadOverlay();
+          return null;
+        }
+        const p = boardState[r]?.[c];
+        if (!p) {
+          clearSquareHighlights();
+          selectedSquare = null;
+          inspectedSquare = null;
+          validMoves = [];
+          updatePieceOverheadOverlay();
+          return null;
+        }
+        if (p.color === currentTurn) {
+          selectedSquare = { r, c };
+          inspectedSquare = { r, c };
+          validMoves = getLegalMovesForPiece(r, c);
+          showSquareHighlights(r, c, validMoves);
+        } else {
+          clearSquareHighlights();
+          selectedSquare = null;
+          validMoves = [];
+          inspectedSquare = { r, c };
+          showEnemyInspectHighlight(r, c);
+        }
+        updatePieceOverheadOverlay();
+        return {
+          r,
+          c,
+          type: p.type,
+          color: p.color,
+          isFriendly: p.color === currentTurn
+        };
+      },
       setPieceTheme: applyPieceTheme,
       cyclePieceTheme,
       getPieceTheme: () => currentPieceThemeId,
@@ -8405,6 +8809,15 @@ export function initWizardChess() {
         brazierPillars: CATHEDRAL_SOLID_PILLARS.filter((p) => !p.isColumn),
         boardSqSize: BOARD_SQ_SIZE,
         pieceScaleFactor: PIECE_SCALE_FACTOR,
+        roleScaleMultipliers: ROLE_SCALE_MULTIPLIERS,
+        combatCameraZoomEnabled,
+        pieceLabelMode,
+        inspectedSquare,
+        visibleOverheadBadgeCount: overheadBadgeSlots.filter((s) => s.visible).length,
+        inspectCardVisible: Boolean(
+          document.getElementById('piece-inspect-card')?.classList.contains('visible')
+        ),
+        inspectCardText: document.getElementById('piece-inspect-card')?.textContent || '',
         currentPieceThemeId,
         activeSkinWhite,
         activeSkinBlack,
@@ -8553,6 +8966,7 @@ export function initWizardChess() {
         stepScene(subDt, false);
       }
       renderer.render(scene, camera);
+      updatePieceOverheadOverlay();
     };
 
     // =========================================================================
@@ -8883,6 +9297,7 @@ export function initWizardChess() {
 
       if (doRender && !isWebGLContextLost) {
         renderer.render(scene, camera);
+        updatePieceOverheadOverlay();
       }
     }
 
@@ -9010,6 +9425,7 @@ export function initWizardChess() {
       }
       if (!isWebGLContextLost) {
         renderer.render(scene, camera);
+        updatePieceOverheadOverlay();
       }
     }
 

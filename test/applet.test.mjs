@@ -1421,5 +1421,51 @@ test('Outer Sanctum Amphitheater & 8 Theme-Reactive Guardian Monument Archetypes
   );
 });
 
+test('19. Steady 3D Combat Camera (No Zoom-In/Out Sickness) & 3-Layer Piece Identification System', () => {
+  const appTsx = fs.readFileSync(path.join(ROOT, 'src/App.tsx'), 'utf-8');
+  const stylesCss = fs.readFileSync(path.join(ROOT, 'src/styles.css'), 'utf-8');
+  const engineJs = fs.readFileSync(path.join(ROOT, 'src/wizardChessEngine.js'), 'utf-8');
+
+  // 1. Steady 3D Combat Camera contract (no nauseating zoom-in/out or vertical camera shake during combat)
+  assert.ok(
+    engineJs.includes('let combatCameraZoomEnabled = false;') &&
+      engineJs.includes('const activeDuelCamSwoop = useDuelCamSwoop && combatCameraZoomEnabled;') &&
+      engineJs.includes('if (activeDuelCamSwoop)'),
+    'Engine must disable combat camera zoom-in/out and tremor by default (combatCameraZoomEnabled = false) even when Free 3D camera is unlocked'
+  );
+
+  // 2. Layer 1 & Layer 2 DOM Overhead Layer, Floating Inspect Card & HUD toggles
+  assert.ok(
+    appTsx.includes('id="piece-overhead-layer"') &&
+      appTsx.includes('id="piece-inspect-card"') &&
+      appTsx.includes('id="btn-piece-labels"') &&
+      appTsx.includes('id="btn-quick-labels"'),
+    'App.tsx must render #piece-overhead-layer, #piece-inspect-card, #btn-piece-labels, and #btn-quick-labels'
+  );
+  assert.ok(
+    stylesCss.includes('.piece-overhead-badge') &&
+      stylesCss.includes('.piece-overhead-badge.is-capture-target') &&
+      stylesCss.includes('.piece-inspect-card.visible') &&
+      stylesCss.includes('body.cinematic-ui-hidden #piece-overhead-layer'),
+    'styles.css must style the 32-slot overhead role badges, capture target threat pills, and floating inspect card'
+  );
+
+  // 3. Layer 3 Role Height Hierarchy (ROLE_SCALE_MULTIPLIERS), Pedestal Faction Ring & Enemy Inspection
+  assert.ok(
+    engineJs.includes('const ROLE_SCALE_MULTIPLIERS = {') &&
+      engineJs.includes('function getPieceWorldScale(type)') &&
+      engineJs.includes('const PIECE_ROLE_METADATA = {') &&
+      engineJs.includes('const sharedPiecePedestalRingGeo ='),
+    'Engine must define ROLE_SCALE_MULTIPLIERS, getPieceWorldScale, PIECE_ROLE_METADATA, and sharedPiecePedestalRingGeo'
+  );
+  assert.ok(
+    engineJs.includes('function updatePieceOverheadOverlay()') &&
+      engineJs.includes('showEnemyInspectHighlight(clickedR, clickedC)') &&
+      engineJs.includes('inspectSquare:'),
+    'Engine must update overhead role badges, support clicking/tapping enemy pieces to inspect their name/moves, and expose inspectSquare'
+  );
+});
+
+
 
 
