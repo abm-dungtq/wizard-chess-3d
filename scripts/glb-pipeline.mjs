@@ -24,13 +24,28 @@ const PIECE_NAMES = [
   'king_white',
 ];
 
-const mode = process.argv[2] || 'pack';
-const customDir = process.argv[3] ? path.resolve(process.argv[3]) : DEFAULT_WS_DIR;
+const XIANGQI_PIECE_NAMES = [
+  'king_white',
+  'advisor_white',
+  'elephant_white',
+  'rook_white',
+  'cannon_white',
+  'knight_white',
+  'pawn_white',
+];
+
+const isXiangqi = process.argv.includes('--xiangqi');
+const positionalArgs = process.argv.slice(2).filter((arg) => arg !== '--xiangqi');
+const mode = positionalArgs[0] || 'pack';
+const activeNames = isXiangqi ? XIANGQI_PIECE_NAMES : PIECE_NAMES;
+const activeAssetDir = isXiangqi ? path.join(GLB_ASSET_DIR, 'xiangqi') : GLB_ASSET_DIR;
+const defaultWs = isXiangqi ? path.join(ROOT, '.tools/blender-workspace/xiangqi') : DEFAULT_WS_DIR;
+const customDir = positionalArgs[1] ? path.resolve(positionalArgs[1]) : defaultWs;
 
 if (mode === 'unpack') {
   fs.mkdirSync(customDir, { recursive: true });
-  for (const name of PIECE_NAMES) {
-    const b64Path = path.join(GLB_ASSET_DIR, `${name}.glb.gz.b64`);
+  for (const name of activeNames) {
+    const b64Path = path.join(activeAssetDir, `${name}.glb.gz.b64`);
     const b64Text = fs.readFileSync(b64Path, 'utf-8').trim();
     const glbBuf = zlib.gunzipSync(Buffer.from(b64Text, 'base64'));
     const outPath = path.join(customDir, `${name}.glb`);
@@ -38,7 +53,8 @@ if (mode === 'unpack') {
     console.log(`[glb:unpack] ${name}.glb (${(glbBuf.length / 1024).toFixed(1)} KB) -> ${outPath}`);
   }
 } else if (mode === 'pack') {
-  for (const name of PIECE_NAMES) {
+  fs.mkdirSync(activeAssetDir, { recursive: true });
+  for (const name of activeNames) {
     const inPath = path.join(customDir, `${name}.glb`);
     if (!fs.existsSync(inPath)) {
       throw new Error(`Missing source GLB: ${inPath}`);
@@ -50,7 +66,7 @@ if (mode === 'unpack') {
     }
     const gzBuf = zlib.gzipSync(glbBuf, { level: 9 });
     const b64Text = gzBuf.toString('base64');
-    const outPath = path.join(GLB_ASSET_DIR, `${name}.glb.gz.b64`);
+    const outPath = path.join(activeAssetDir, `${name}.glb.gz.b64`);
     fs.writeFileSync(outPath, b64Text, 'utf-8');
     console.log(`[glb:pack] ${name}.glb.gz.b64 (${(b64Text.length / 1024).toFixed(1)} KB b64) <- ${inPath}`);
   }

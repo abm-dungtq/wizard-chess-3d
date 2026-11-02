@@ -4,6 +4,7 @@ export interface RoomCoord {
 }
 
 export type PromotionPieceType = 'queen' | 'rook' | 'bishop' | 'knight';
+export type GameVariant = 'chess' | 'xiangqi';
 
 export interface RoomMove {
   seq: number;
@@ -17,6 +18,7 @@ export interface RoomMove {
 export interface PublicRoomState {
   code: string;
   status: 'waiting' | 'playing';
+  gameVariant?: GameVariant;
   whiteJoined: boolean;
   blackJoined: boolean;
   whiteSkin: string;
@@ -43,18 +45,24 @@ function normalizePromotion(raw?: string): PromotionPieceType {
   return 'queen';
 }
 
-function isValidCoord(coord: unknown): coord is RoomCoord {
+function normalizeGameVariant(raw?: string): GameVariant {
+  return raw === 'xiangqi' ? 'xiangqi' : 'chess';
+}
+
+function isValidCoord(coord: unknown, variant: GameVariant = 'xiangqi'): coord is RoomCoord {
   if (!coord || typeof coord !== 'object') return false;
   const { r, c } = coord as { r?: unknown; c?: unknown };
+  const maxRows = variant === 'xiangqi' ? 10 : 8;
+  const maxCols = variant === 'xiangqi' ? 9 : 8;
   return (
     typeof r === 'number' &&
     typeof c === 'number' &&
     Number.isInteger(r) &&
     Number.isInteger(c) &&
     r >= 0 &&
-    r < 8 &&
+    r < maxRows &&
     c >= 0 &&
-    c < 8
+    c < maxCols
   );
 }
 
@@ -62,6 +70,7 @@ function toPublicRoom(entry: InternalRoomEntry): PublicRoomState {
   return {
     code: entry.code,
     status: entry.status,
+    gameVariant: entry.gameVariant || 'chess',
     whiteJoined: entry.whiteJoined,
     blackJoined: entry.blackJoined,
     whiteSkin: entry.whiteSkin || 'hogwarts',
@@ -119,18 +128,26 @@ export class RoomStore {
     }
   }
 
-  createRoom(preferredColor?: string, playerToken?: string, explicitCode?: string, skinId?: string) {
+  createRoom(
+    preferredColor?: string,
+    playerToken?: string,
+    explicitCode?: string,
+    skinId?: string,
+    gameVariant?: string
+  ) {
     this.pruneExpiredRooms();
     const cleanedExplicit = String(explicitCode || '').trim().toUpperCase();
     const code = cleanedExplicit || this.generateUniqueCode();
     const token = this.ensureToken(playerToken);
     const side: 'w' | 'b' = preferredColor === 'b' ? 'b' : 'w';
     const skin = String(skinId || '').trim() || 'hogwarts';
+    const variant = normalizeGameVariant(gameVariant);
     const now = Date.now();
 
     const entry: InternalRoomEntry = {
       code,
       status: 'waiting',
+      gameVariant: variant,
       whiteJoined: side === 'w',
       blackJoined: side === 'b',
       whiteSkin: side === 'w' ? skin : 'hogwarts',
@@ -154,7 +171,7 @@ export class RoomStore {
     };
   }
 
-  joinRoom(codeInput: string, playerToken?: string, skinId?: string) {
+  joinRoom(codeInput: string, playerToken?: string, skinId?: string, gameVariant?: string) {
     this.pruneExpiredRooms();
     const code = String(codeInput || '').trim().toUpperCase();
     if (!code) {
@@ -171,6 +188,7 @@ export class RoomStore {
       entry = {
         code,
         status: 'waiting',
+        gameVariant: normalizeGameVariant(gameVariant),
         whiteJoined: true,
         blackJoined: false,
         whiteSkin: skin || 'hogwarts',
@@ -185,6 +203,9 @@ export class RoomStore {
       };
       this.rooms.set(code, entry);
     } else {
+      if (gameVariant === 'xiangqi' || gameVariant === 'chess') {
+        entry.gameVariant = gameVariant;
+      }
       if (entry.whiteToken === token) {
         assignedColor = 'w';
         entry.whiteJoined = true;
@@ -261,6 +282,7 @@ export class RoomStore {
       from?: unknown;
       to?: unknown;
       promotion?: string;
+      gameVariant?: string;
     }
   ) {
     const code = String(codeInput || '').trim().toUpperCase();
@@ -268,8 +290,24 @@ export class RoomStore {
     if (!entry) {
       return { ok: false as const, error: 'Room not found' };
     }
-    if (!isValidCoord(payload.from) || !isValidCoord(payload.to)) {
+    if (payload.gameVariant === 'xiangqi' || payload.gameVariant === 'chess') {
+      entry.gameVariant = payload.gameVariant;
+    }
+    // Support both 8x8 Chess and 10x9 Xiangqi coordinates
+    const effectiveVariant: GameVariant =
+      entry.gameVariant === 'xiangqi' ||
+      payload.gameVariant === 'xiangqi' ||
+      ((payload.from as RoomCoord | undefined)?.r ?? 0) >= 8 ||
+      ((payload.from as RoomCoord | undefined)?.c ?? 0) >= 8 ||
+      ((payload.to as RoomCoord | undefined)?.r ?? 0) >= 8 ||
+      ((payload.to as RoomCoord | undefined)?.c ?? 0) >= 8
+        ? 'xiangqi'
+        : 'chess';
+    if (!isValidCoord(payload.from, effectiveVariant) || !isValidCoord(payload.to, effectiveVariant)) {
       return { ok: false as const, error: 'Invalid move coordinates', room: toPublicRoom(entry) };
+    }
+    if (effectiveVariant === 'xiangqi') {
+      entry.gameVariant = 'xiangqi';
     }
     const moveColor: 'w' | 'b' = payload.color === 'b' ? 'b' : 'w';
     if (moveColor !== entry.turn) {
@@ -310,11 +348,14 @@ export class RoomStore {
     };
   }
 
-  resetRoom(codeInput: string) {
+  resetRoom(codeInput: string, gameVariant?: string) {
     const code = String(codeInput || '').trim().toUpperCase();
     const entry = this.rooms.get(code);
     if (!entry) {
       return { ok: false as const, error: 'Room not found' };
+    }
+    if (gameVariant === 'xiangqi' || gameVariant === 'chess') {
+      entry.gameVariant = gameVariant;
     }
     entry.moves = [];
     entry.turn = 'w';
@@ -394,7 +435,8 @@ export async function handleRoomApiRequest(
       typeof body.preferredColor === 'string' ? body.preferredColor : undefined,
       typeof body.playerToken === 'string' ? body.playerToken : undefined,
       typeof body.code === 'string' ? body.code : undefined,
-      typeof body.skinId === 'string' ? body.skinId : undefined
+      typeof body.skinId === 'string' ? body.skinId : undefined,
+      typeof body.gameVariant === 'string' ? body.gameVariant : undefined
     );
     return jsonResponse(result, 200);
   }
@@ -404,7 +446,8 @@ export async function handleRoomApiRequest(
     const result = store.joinRoom(
       typeof body.code === 'string' ? body.code : '',
       typeof body.playerToken === 'string' ? body.playerToken : undefined,
-      typeof body.skinId === 'string' ? body.skinId : undefined
+      typeof body.skinId === 'string' ? body.skinId : undefined,
+      typeof body.gameVariant === 'string' ? body.gameVariant : undefined
     );
     return jsonResponse(result, result.ok ? 200 : result.error === 'Room not found' ? 404 : 400);
   }
@@ -438,13 +481,18 @@ export async function handleRoomApiRequest(
       color: typeof body.color === 'string' ? body.color : undefined,
       from: body.from,
       to: body.to,
-      promotion: typeof body.promotion === 'string' ? body.promotion : undefined
+      promotion: typeof body.promotion === 'string' ? body.promotion : undefined,
+      gameVariant: typeof body.gameVariant === 'string' ? body.gameVariant : undefined
     });
     return jsonResponse(result, result.ok ? 200 : result.error === 'Room not found' ? 404 : 400);
   }
 
   if (action === 'reset' && request.method === 'POST') {
-    const result = store.resetRoom(code);
+    const body = await readJsonBody(request);
+    const result = store.resetRoom(
+      code,
+      typeof body.gameVariant === 'string' ? body.gameVariant : undefined
+    );
     return jsonResponse(result, result.ok ? 200 : 404);
   }
 
@@ -487,6 +535,221 @@ export async function handleRoomApiRequest(
         Connection: 'keep-alive',
         ...CORS_HEADERS
       }
+    });
+  }
+
+  return jsonResponse({ ok: false, error: 'Method not allowed' }, 405);
+}
+
+export interface FeedbackSubmission {
+  id: string;
+  createdAt: string;
+  gameVariant: string;
+  category: string;
+  author: string;
+  message: string;
+  deviceInfo: string;
+  syncedToSheet: boolean;
+  sheetUrl: string;
+}
+
+export interface FeedbackSheetConfig {
+  GOOGLE_SA_EMAIL?: string;
+  GOOGLE_SA_PRIVATE_KEY?: string;
+  GOOGLE_SHEET_ID?: string;
+}
+
+export const DEFAULT_FEEDBACK_SHEET_ID = '15M_B8VXZkYySTUIm2ZyIq-lw7dDCnshyICDR-sS7pv8';
+export const DEFAULT_FEEDBACK_SHEET_URL = `https://docs.google.com/spreadsheets/d/${DEFAULT_FEEDBACK_SHEET_ID}/edit`;
+
+const inMemoryFeedbackList: FeedbackSubmission[] = [];
+let cachedGoogleAccessToken: { token: string; expiresAt: number } | null = null;
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function textToBase64Url(text: string): string {
+  return bytesToBase64Url(new TextEncoder().encode(text));
+}
+
+function pemToArrayBuffer(pem: string): ArrayBuffer {
+  const normalized = pem
+    .replace(/\\n/g, '\n')
+    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+    .replace(/-----END PRIVATE KEY-----/g, '')
+    .replace(/\s+/g, '');
+  const binary = atob(normalized);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+async function getGoogleSheetsAccessToken(saEmail: string, saPrivateKey: string): Promise<string> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (cachedGoogleAccessToken && cachedGoogleAccessToken.expiresAt > nowSec + 60) {
+    return cachedGoogleAccessToken.token;
+  }
+
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: saEmail,
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: nowSec,
+    exp: nowSec + 3600
+  };
+
+  const unsignedJwt = `${textToBase64Url(JSON.stringify(header))}.${textToBase64Url(JSON.stringify(payload))}`;
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8',
+    pemToArrayBuffer(saPrivateKey),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signatureBuf = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    cryptoKey,
+    new TextEncoder().encode(unsignedJwt)
+  );
+  const jwt = `${unsignedJwt}.${bytesToBase64Url(new Uint8Array(signatureBuf))}`;
+
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt
+    })
+  });
+  if (!tokenRes.ok) {
+    throw new Error(`Google OAuth2 token error: ${tokenRes.status}`);
+  }
+  const tokenJson = (await tokenRes.json()) as { access_token?: string; expires_in?: number };
+  if (!tokenJson.access_token) {
+    throw new Error('Missing access_token in Google OAuth2 response');
+  }
+  cachedGoogleAccessToken = {
+    token: tokenJson.access_token,
+    expiresAt: nowSec + (tokenJson.expires_in || 3500)
+  };
+  return tokenJson.access_token;
+}
+
+async function appendRowToGoogleSheet(
+  rowValues: string[],
+  config?: FeedbackSheetConfig
+): Promise<{ synced: boolean; sheetId: string }> {
+  const sheetId = String(config?.GOOGLE_SHEET_ID || DEFAULT_FEEDBACK_SHEET_ID).trim();
+  const saEmail = String(config?.GOOGLE_SA_EMAIL || '').trim();
+  const saKey = String(config?.GOOGLE_SA_PRIVATE_KEY || '').trim();
+  if (!saEmail || !saKey || !sheetId) {
+    return { synced: false, sheetId };
+  }
+  const accessToken = await getGoogleSheetsAccessToken(saEmail, saKey);
+  const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+    sheetId
+  )}/values/DeXuat!A1:F1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+  const res = await fetch(appendUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      values: [rowValues]
+    })
+  });
+  return { synced: res.ok, sheetId };
+}
+
+export async function handleFeedbackApiRequest(
+  request: Request,
+  config?: FeedbackSheetConfig
+): Promise<Response | null> {
+  const url = new URL(request.url, 'http://localhost');
+  if (!url.pathname.startsWith('/api/feedback')) {
+    return null;
+  }
+
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
+  const sheetId = String(config?.GOOGLE_SHEET_ID || DEFAULT_FEEDBACK_SHEET_ID).trim();
+  const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+
+  if (request.method === 'GET') {
+    return jsonResponse({
+      ok: true,
+      sheetId,
+      sheetUrl,
+      items: inMemoryFeedbackList.slice(-50).reverse()
+    });
+  }
+
+  if (request.method === 'POST') {
+    const body = await readJsonBody(request);
+    const message = String(body.message || '').trim().slice(0, 1500);
+    if (!message || message.length < 2) {
+      return jsonResponse({ ok: false, error: 'Vui lòng nhập nội dung đề xuất của bạn.' }, 400);
+    }
+
+    const rawVariant = String(body.gameVariant || 'both').trim();
+    const variantLabel =
+      rawVariant === 'xiangqi'
+        ? 'Cờ Tướng 3D (9×10)'
+        : rawVariant === 'chess'
+          ? 'Cờ Vua 3D (8×8)'
+          : 'Cả 2 Môn (Cờ Vua & Cờ Tướng)';
+    const category = String(body.category || 'Ý tưởng tính năng mới').trim().slice(0, 120);
+    const author = String(body.author || 'Người chơi ẩn danh').trim().slice(0, 120) || 'Người chơi ẩn danh';
+    const deviceInfo = String(body.deviceInfo || request.headers.get('user-agent') || 'Web Browser')
+      .trim()
+      .slice(0, 220);
+
+    const createdAt = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+    let syncedToSheet = false;
+
+    try {
+      const sheetRes = await appendRowToGoogleSheet(
+        [createdAt, variantLabel, category, author, message, deviceInfo],
+        config
+      );
+      syncedToSheet = sheetRes.synced;
+    } catch {
+      syncedToSheet = false;
+    }
+
+    const entry: FeedbackSubmission = {
+      id: 'fb_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7),
+      createdAt,
+      gameVariant: variantLabel,
+      category,
+      author,
+      message,
+      deviceInfo,
+      syncedToSheet,
+      sheetUrl
+    };
+    inMemoryFeedbackList.push(entry);
+    if (inMemoryFeedbackList.length > 200) {
+      inMemoryFeedbackList.shift();
+    }
+
+    return jsonResponse({
+      ok: true,
+      feedback: entry,
+      syncedToSheet,
+      sheetId,
+      sheetUrl
     });
   }
 

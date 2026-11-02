@@ -3,14 +3,14 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { cloudflare } from '@cloudflare/vite-plugin';
-import { defaultRoomStore, handleRoomApiRequest } from './src/roomStore.ts';
+import { defaultRoomStore, handleFeedbackApiRequest, handleRoomApiRequest } from './src/roomStore.ts';
 
 function attachRoomApiMiddleware(middlewares: {
   use: (fn: (req: IncomingMessage, res: ServerResponse, next: () => void) => void) => void;
 }) {
   middlewares.use(async (req, res, next) => {
     const rawUrl = req.url || '';
-    if (!rawUrl.startsWith('/api/rooms')) {
+    if (!rawUrl.startsWith('/api/rooms') && !rawUrl.startsWith('/api/feedback')) {
       next();
       return;
     }
@@ -42,7 +42,9 @@ function attachRoomApiMiddleware(middlewares: {
         signal: abortController.signal
       });
 
-      const webRes = await handleRoomApiRequest(webReq, defaultRoomStore);
+      const webRes = rawUrl.startsWith('/api/feedback')
+        ? await handleFeedbackApiRequest(webReq)
+        : await handleRoomApiRequest(webReq, defaultRoomStore);
       if (!webRes) {
         next();
         return;

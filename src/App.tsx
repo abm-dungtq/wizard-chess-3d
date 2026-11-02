@@ -1,9 +1,72 @@
-import { useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { initWizardChess } from './wizardChessEngine.js';
 
 export default function App() {
   const initializedRef = useRef(false);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackVariant, setFeedbackVariant] = useState<'both' | 'chess' | 'xiangqi'>('both');
+  const [feedbackCategory, setFeedbackCategory] = useState('Ý tưởng tính năng mới');
+  const [feedbackAuthor, setFeedbackAuthor] = useState('');
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const openFeedbackModal = () => {
+    const activeVar = document.body?.dataset?.gameVariant;
+    if (activeVar === 'xiangqi' || activeVar === 'chess') {
+      setFeedbackVariant(activeVar);
+    } else {
+      setFeedbackVariant('both');
+    }
+    setFeedbackStatus(null);
+    setMobileSheetOpen(false);
+    setFeedbackOpen(true);
+  };
+
+  const handleFeedbackSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = feedbackMessage.trim();
+    if (trimmed.length < 2) {
+      setFeedbackStatus({ ok: false, text: '⚠️ Vui lòng nhập nội dung đề xuất của bạn.' });
+      return;
+    }
+    setFeedbackSubmitting(true);
+    setFeedbackStatus(null);
+    try {
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gameVariant: feedbackVariant,
+          category: feedbackCategory,
+          author: feedbackAuthor.trim() || 'Người chơi ẩn danh',
+          message: trimmed,
+          deviceInfo: `${window.innerWidth}×${window.innerHeight} • ${navigator.userAgent.slice(0, 120)}`
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setFeedbackMessage('');
+        setFeedbackStatus({
+          ok: true,
+          text: '✅ Đã lưu đề xuất của bạn vào Google Sheet! Cảm ơn bạn đã đóng góp phát triển game!'
+        });
+      } else {
+        setFeedbackStatus({
+          ok: false,
+          text: data?.error || '⚠️ Không thể gửi đề xuất lúc này, vui lòng thử lại.'
+        });
+      }
+    } catch {
+      setFeedbackStatus({
+        ok: false,
+        text: '⚠️ Lỗi kết nối mạng, vui lòng thử lại sau giây lát.'
+      });
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     if (initializedRef.current) return;
@@ -15,6 +78,7 @@ export default function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setMobileSheetOpen(false);
+        setFeedbackOpen(false);
       }
     };
     const handleResize = () => {
@@ -98,9 +162,20 @@ export default function App() {
 
           <button
             type="button"
+            className="hud-btn top-primary-btn game-variant-btn"
+            id="btn-game-variant"
+            title="Chuyển đổi nhanh giữa Cờ Vua 3D (8×8) và Cờ Tướng 3D (9×10 Sở Hà Hán Giới)"
+            onClick={() => setMobileSheetOpen(false)}
+          >
+            ♟️ Cờ Vua 3D
+          </button>
+
+          <button
+            type="button"
             className="hud-btn top-primary-btn active"
             id="btn-ai-difficulty"
             title="Chọn Độ Khó AI riêng: Dễ (Novice) • Vừa (Tactical) • Khó (Grandmaster)"
+            onClick={() => setMobileSheetOpen(false)}
           >
             🤖 Độ khó: Vừa
           </button>
@@ -175,6 +250,34 @@ export default function App() {
               aria-label="Close Controls"
             >
               Đóng ✕
+            </button>
+          </div>
+
+          <div
+            id="variant-segmented-pill"
+            className="variant-segmented-pill"
+            role="group"
+            aria-label="Chọn Chế Độ Bàn Cờ"
+          >
+            <button
+              type="button"
+              id="btn-seg-chess"
+              className="variant-seg-btn active"
+              data-set-variant="chess"
+              title="Chuyển ngay sang Cờ Vua Phù Thủy 3D (8×8)"
+              onClick={() => setMobileSheetOpen(false)}
+            >
+              ♟️ Cờ Vua 3D (8×8)
+            </button>
+            <button
+              type="button"
+              id="btn-seg-xiangqi"
+              className="variant-seg-btn"
+              data-set-variant="xiangqi"
+              title="Chuyển ngay sang Cờ Tướng 3D — Sở Hán (9×10)"
+              onClick={() => setMobileSheetOpen(false)}
+            >
+              🀄 Cờ Tướng 3D (9×10)
             </button>
           </div>
 
@@ -295,14 +398,14 @@ export default function App() {
             🎨 Skin: Cẩm Thạch
           </button>
           <button
-            className="hud-btn active"
+            className="hud-btn"
             id="btn-cam-player"
             title="Góc nhìn Người Chơi (Bấm lần nữa để lật Trắng / Đen)"
           >
             Góc 3D Chính
           </button>
           <button
-            className="hud-btn"
+            className="hud-btn active"
             id="btn-cam-top"
             title="Góc nhìn Từ Trên Xuống (Bấm lần nữa để lật Trắng / Đen)"
           >
@@ -352,11 +455,19 @@ export default function App() {
         <div className="mobile-quick-dock" id="mobile-quick-dock" aria-label="Mobile Quick Actions">
           <button
             type="button"
+            className="hud-btn mobile-dock-btn game-variant-btn"
+            id="btn-quick-variant"
+            title="Chuyển đổi nhanh giữa Cờ Vua 3D (8×8) và Cờ Tướng 3D (9×10)"
+          >
+            ♟️ Vua
+          </button>
+          <button
+            type="button"
             className="hud-btn mobile-dock-btn active"
             id="btn-quick-cam"
-            title="Chuyển nhanh giữa Góc nhìn 3D (Player Cam) và Góc nhìn Từ Trên Xuống (Overhead)"
+            title="Chuyển nhanh giữa Góc nhìn Từ Trên Xuống (Overhead) và Góc nhìn 3D (Player Cam)"
           >
-            📐 Góc: 3D
+            📐 Góc: Top
           </button>
           <button
             type="button"
@@ -370,9 +481,9 @@ export default function App() {
             type="button"
             className="hud-btn mobile-dock-btn active"
             id="btn-quick-labels"
-            title="Chuyển chế độ hiển thị Tên Quân Cờ trên đầu: Thông Minh (Hiện Vua, Hậu, Xe, Tượng, Mã) • Tất Cả (32 Quân) • Khi Chạm"
+            title="Chuyển chế độ hiển thị Tên Quân Cờ trên đầu: Thông Minh • Tất Cả (32) • Khi Chạm"
           >
-            🏷️ Tên: Cờ Lớn
+            🏷️ Tên: Bật
           </button>
           <button
             type="button"
@@ -643,6 +754,225 @@ export default function App() {
               Đóng Cửa Hàng &amp; Vào Trận
             </button>
           </div>
+        </div>
+      </div>
+
+      <div
+        id="game-selector-overlay"
+        className="visible"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="game-selector-title"
+      >
+        <div className="promotion-modal game-selector-card">
+          <div className="checkmate-ornament">✦ &nbsp; Sanctum 3D Grand Arena • chess.tqd.io.vn &nbsp; ✦</div>
+          <div className="promotion-title" id="game-selector-title">Chọn Đấu Trường Cờ 3D</div>
+          <div className="skin-shop-subtitle">
+            Khám phá 2 tuyệt tác sàn đấu 3D thời gian thực • Bạn có thể đổi môn cờ bất cứ lúc nào trên thanh điều khiển
+          </div>
+          <div className="checkmate-rule"></div>
+
+          <div className="arena-selector-grid">
+            <div
+              className="arena-choice-card selected"
+              id="card-select-chess"
+              data-select-variant="chess"
+            >
+              <div className="arena-preview-wrap">
+                <img
+                  src="/assets/demo-chess-arena.jpg?v=20261102_top"
+                  alt="Sàn đấu Cờ Vua 3D Đại Thánh Đường"
+                  className="arena-demo-img"
+                  draggable={false}
+                />
+                <span className="arena-badge chess-badge">PHƯƠNG TÂY CỔ ĐIỂN • 8×8 Ô ĐÁ</span>
+                <span className="arena-active-pill" id="badge-active-chess">✓ Đang Chọn</span>
+              </div>
+              <div className="arena-card-body">
+                <div className="arena-card-title">♟️ Cờ Vua 3D — Đại Thánh Đường</div>
+                <div className="arena-card-desc">
+                  Bàn cờ 8×8 Cẩm Thạch &amp; Hắc Diện Thạch Mạ Vàng (3.52m) • 32 Tượng Thần Điêu Khắc Nổi • 8 Bộ Skin Thần Thoại • Hiệu Ứng Đập Vỡ Đá 3D
+                </div>
+                <div className="arena-feature-tags">
+                  <span className="arena-tag">♔ Chuẩn FIDE</span>
+                  <span className="arena-tag">👑 8 Bộ Skin 3D</span>
+                  <span className="arena-tag">🤖 AI 3 Cấp Độ</span>
+                  <span className="arena-tag">⚔️ Đấu 2 Người</span>
+                </div>
+                <button type="button" className="checkmate-btn arena-cta-btn" id="btn-select-chess">
+                  ♟️ Vào Sàn Đấu Cờ Vua 3D
+                </button>
+              </div>
+            </div>
+
+            <div
+              className="arena-choice-card xiangqi-card"
+              id="card-select-xiangqi"
+              data-select-variant="xiangqi"
+            >
+              <div className="arena-preview-wrap">
+                <img
+                  src="/assets/demo-xiangqi-arena.jpg?v=20261102_top"
+                  alt="Sàn đấu Cờ Tướng 3D Sở Hà Hán Giới"
+                  className="arena-demo-img"
+                  draggable={false}
+                />
+                <span className="arena-badge xiangqi-badge">ĐÔNG Á CỔ ĐẠI • 9×10 GIAO ĐIỂM</span>
+                <span className="arena-active-pill" id="badge-active-xiangqi">MỚI RA MẮT</span>
+              </div>
+              <div className="arena-card-body">
+                <div className="arena-card-title">🀄 Cờ Tướng 3D — Hán Sở Phong Vân</div>
+                <div className="arena-card-desc">
+                  Bàn cờ 9×10 Ngọc Bích &amp; Đồng Đỏ • Sông <strong>楚河 — 漢界 (Sở Hà — Hán Giới)</strong> &amp; Cửu Cung • 32 Chiến Thần Chu Sa &amp; Hắc Ngọc Điêu Khắc Từ Đầu (Soái/Tướng, Sĩ, Tịnh/Tượng, Xe, Pháo, Mã, Binh/Tốt)
+                </div>
+                <div className="arena-feature-tags">
+                  <span className="arena-tag">🔥 Pháo Kích Cầu Vồng</span>
+                  <span className="arena-tag">🐎 Báo Cản Mã / Mắt Tượng</span>
+                  <span className="arena-tag">🤖 AI Cờ Tướng</span>
+                  <span className="arena-tag">⚔️ Đấu 2 Người</span>
+                </div>
+                <button type="button" className="checkmate-btn arena-cta-btn xiangqi-cta" id="btn-select-xiangqi">
+                  🀄 Vào Sàn Đấu Cờ Tướng 3D
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="checkmate-actions" style={{ marginTop: '12px' }}>
+            <button
+              type="button"
+              className="checkmate-btn feedback-cta-btn"
+              id="btn-selector-feedback"
+              onClick={openFeedbackModal}
+            >
+              💬 Đề Xuất &amp; Góp Ý Phát Triển Game
+            </button>
+            <button type="button" className="checkmate-btn secondary" id="btn-selector-close">
+              Đóng &amp; Tiếp Tục Ván Hiện Tại
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        className="feedback-corner-fab"
+        id="btn-feedback-fab"
+        onClick={openFeedbackModal}
+        title="Gửi đề xuất, ý tưởng hoặc báo lỗi để giúp game phát triển hơn"
+        aria-label="Đề Xuất và Góp Ý"
+      >
+        <span className="feedback-fab-dot" aria-hidden="true"></span>
+        <span>💬 Đề Xuất</span>
+      </button>
+
+      <div
+        id="feedback-modal-overlay"
+        className={feedbackOpen ? 'visible' : ''}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="feedback-modal-title"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setFeedbackOpen(false);
+        }}
+      >
+        <div className="promotion-modal feedback-modal-card">
+          <div className="checkmate-ornament">✦ &nbsp; Sanctum 3D Community • Đồng Sáng Tạo &nbsp; ✦</div>
+          <div className="promotion-title" id="feedback-modal-title">💬 Đề Xuất &amp; Góp Ý Phát Triển Game</div>
+          <div className="skin-shop-subtitle">
+            Mọi ý tưởng của bạn đều được lưu trực tiếp vào bảng theo dõi để đội ngũ nâng cấp Cờ Vua 3D &amp; Cờ Tướng 3D
+          </div>
+          <div className="checkmate-rule"></div>
+
+          <form className="feedback-form" onSubmit={handleFeedbackSubmit}>
+            <div className="feedback-row-grid">
+              <label className="feedback-field">
+                <span className="feedback-label">1. Môn Cờ Góp Ý</span>
+                <select
+                  id="feedback-variant"
+                  className="feedback-select"
+                  value={feedbackVariant}
+                  onChange={(e) => setFeedbackVariant(e.target.value as 'both' | 'chess' | 'xiangqi')}
+                >
+                  <option value="both">🌟 Cả 2 Môn (Cờ Vua &amp; Cờ Tướng)</option>
+                  <option value="chess">♟️ Cờ Vua 3D (8×8)</option>
+                  <option value="xiangqi">🀄 Cờ Tướng 3D (9×10)</option>
+                </select>
+              </label>
+
+              <label className="feedback-field">
+                <span className="feedback-label">2. Hạng Mục Đề Xuất</span>
+                <select
+                  id="feedback-category"
+                  className="feedback-select"
+                  value={feedbackCategory}
+                  onChange={(e) => setFeedbackCategory(e.target.value)}
+                >
+                  <option value="Ý tưởng tính năng mới">💡 Ý tưởng tính năng mới</option>
+                  <option value="Tạo hình & Màu quân cờ 3D">🎨 Tạo hình &amp; Màu quân cờ 3D</option>
+                  <option value="Độ khó AI & Luật cờ">🤖 Độ khó AI &amp; Luật cờ</option>
+                  <option value="Giao diện Mobile & PC">📱 Giao diện Mobile &amp; PC</option>
+                  <option value="Báo lỗi / Khác">🐞 Báo lỗi / Khác</option>
+                </select>
+              </label>
+            </div>
+
+            <label className="feedback-field">
+              <span className="feedback-label">3. Tên hoặc Liên Hệ Của Bạn (Không bắt buộc)</span>
+              <input
+                id="feedback-author"
+                type="text"
+                className="feedback-input"
+                placeholder="VD: Minh Quân / SĐT hoặc Email..."
+                maxLength={100}
+                value={feedbackAuthor}
+                onChange={(e) => setFeedbackAuthor(e.target.value)}
+              />
+            </label>
+
+            <label className="feedback-field">
+              <span className="feedback-label">4. Nội Dung Đề Xuất / Ý Tưởng Của Bạn *</span>
+              <textarea
+                id="feedback-message"
+                className="feedback-textarea"
+                rows={4}
+                placeholder="Nhập ý tưởng tính năng, góp ý tạo hình quân cờ, góc camera hoặc trải nghiệm bạn mong muốn..."
+                maxLength={1500}
+                required
+                value={feedbackMessage}
+                onChange={(e) => setFeedbackMessage(e.target.value)}
+              />
+            </label>
+
+            {feedbackStatus && (
+              <div
+                id="feedback-status-banner"
+                className={`feedback-status-banner ${feedbackStatus.ok ? 'ok' : 'err'}`}
+                role="status"
+              >
+                {feedbackStatus.text}
+              </div>
+            )}
+
+            <div className="checkmate-actions" style={{ marginTop: '8px' }}>
+              <button
+                type="submit"
+                className="checkmate-btn"
+                id="btn-feedback-submit"
+                disabled={feedbackSubmitting}
+              >
+                {feedbackSubmitting ? '⏳ Đang Lưu Đề Xuất...' : '🚀 Gửi Đề Xuất Ngay'}
+              </button>
+              <button
+                type="button"
+                className="checkmate-btn secondary"
+                id="btn-feedback-close"
+                onClick={() => setFeedbackOpen(false)}
+              >
+                Đóng
+              </button>
+            </div>
+          </form>
         </div>
       </div>
 

@@ -512,6 +512,77 @@ export class WizardAudioEngine {
       return;
     }
 
+    if (pType === 'cannon') {
+      if (stage === 'windup' || stage === 'contact1') {
+        // Dragon-Mouth Siege Cannon fuse ignition & mortar launch whistle
+        const launch = ctx.createOscillator();
+        const launchGain = ctx.createGain();
+        launch.type = 'sawtooth';
+        launch.frequency.setValueAtTime(140, now);
+        launch.frequency.exponentialRampToValueAtTime(620, now + 0.22);
+        launch.frequency.exponentialRampToValueAtTime(190, now + 0.42);
+        launchGain.gain.setValueAtTime(0.24, now);
+        launchGain.gain.exponentialRampToValueAtTime(0.001, now + 0.44);
+        launch.connect(launchGain);
+        launchGain.connect(ctx.destination);
+        this.bindAutoDisconnect(launch, launchGain);
+        launch.start(now);
+        launch.stop(now + 0.45);
+      } else {
+        // Artillery shell detonation & bronze barrel recoil boom
+        const boom = ctx.createOscillator();
+        const boomGain = ctx.createGain();
+        boom.type = 'sine';
+        boom.frequency.setValueAtTime(160, now);
+        boom.frequency.exponentialRampToValueAtTime(26, now + 0.56);
+        boomGain.gain.setValueAtTime(0.34, now);
+        boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.58);
+        boom.connect(boomGain);
+        boomGain.connect(ctx.destination);
+        this.bindAutoDisconnect(boom, boomGain);
+        boom.start(now);
+        boom.stop(now + 0.60);
+      }
+      return;
+    }
+
+    if (pType === 'elephant') {
+      // Armored War Elephant trumpet & twin-tusk seismic stomp
+      const stomp = ctx.createOscillator();
+      const stompGain = ctx.createGain();
+      stomp.type = 'triangle';
+      stomp.frequency.setValueAtTime(stage === 'windup' ? 280 : 96, now);
+      stomp.frequency.exponentialRampToValueAtTime(stage === 'windup' ? 180 : 28, now + 0.48);
+      stompGain.gain.setValueAtTime(0.28, now);
+      stompGain.gain.exponentialRampToValueAtTime(0.001, now + 0.50);
+      stomp.connect(stompGain);
+      stompGain.connect(ctx.destination);
+      this.bindAutoDisconnect(stomp, stompGain);
+      stomp.start(now);
+      stomp.stop(now + 0.52);
+      return;
+    }
+
+    if (pType === 'advisor') {
+      // Imperial Twin-Jian Guard crisp jade & steel cross-slash
+      const slashFreqs = [660, 990, 1485];
+      for (const f of slashFreqs) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(f * 1.2, now);
+        osc.frequency.exponentialRampToValueAtTime(f * 0.62, now + 0.20);
+        gain.gain.setValueAtTime(0.07, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.21);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        this.bindAutoDisconnect(osc, gain);
+        osc.start(now);
+        osc.stop(now + 0.22);
+      }
+      return;
+    }
+
     // Default / King: Sovereign Execution — Heaven-Cleaver Greatsword & Royal Lightning Smite
     if (stage === 'windup' || stage === 'contact1') {
       // Sovereign brass horn + sky-lightning crackle

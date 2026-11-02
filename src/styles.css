@@ -163,6 +163,20 @@ html, body, #root {
   color: var(--gold-bright);
 }
 
+.hud-btn.game-variant-btn {
+  border-color: rgba(245, 215, 110, 0.55);
+  background: linear-gradient(135deg, rgba(180, 42, 42, 0.34), rgba(16, 20, 32, 0.88));
+  color: #fde68a;
+  font-weight: 700;
+}
+
+.hud-btn.game-variant-btn.active {
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.52), rgba(212, 175, 55, 0.28));
+  border-color: #fbbf24;
+  color: #fffbeb;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.42);
+}
+
 /* Bottom HUD */
 #hud-bottom {
   position: fixed;
@@ -576,7 +590,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
   position: fixed;
   top: calc(10px + env(safe-area-inset-top, 0px));
   right: 14px;
-  z-index: 18;
+  z-index: 15;
   width: 66px;
   height: 66px;
   border-radius: 14px;
@@ -610,6 +624,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
 
 #hud-top {
   right: 92px;
+  z-index: 30;
 }
 
 .mobile-sheet-backdrop {
@@ -733,12 +748,59 @@ body.cinematic-ui-hidden #piece-inspect-card {
   white-space: nowrap;
 }
 
+/* 1-Tap Variant Segmented Switcher inside Consolidated Menu (Idea #1) */
+.variant-segmented-pill {
+  grid-column: span 6;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 4px;
+  background: rgba(7, 10, 18, 0.82);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 12px;
+  margin-bottom: 2px;
+}
+
+.variant-seg-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 7px 8px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.variant-seg-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.variant-seg-btn.active {
+  color: #fff6dc;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.28), rgba(180, 83, 9, 0.26));
+  border-color: rgba(244, 211, 114, 0.65);
+  box-shadow: 0 2px 10px rgba(212, 175, 55, 0.22);
+}
+
 /* 3 AI Difficulty tier buttons (1 row of 3) */
 .ai-diff-tier-btn {
   grid-column: span 2;
 }
 
-/* 2-column rows inside the consolidated menu */
+/* Full-width Skin Banner inside the consolidated menu */
+#btn-piece-skin {
+  grid-column: span 6;
+}
+
+/* 2-column rows inside the consolidated menu (zero orphan buttons) */
 #btn-side-toggle,
 #btn-ai-move,
 #btn-menu-2p-pass,
@@ -746,7 +808,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
 #btn-undo,
 #btn-reset,
 #btn-cam-lock,
-#btn-piece-skin,
+#btn-piece-labels,
 #btn-cam-player,
 #btn-cam-top,
 #btn-cam-side,
@@ -806,16 +868,17 @@ body.cinematic-ui-hidden #piece-inspect-card {
 
   .brand-pill,
   .desktop-only-top-btn,
-  #hud-left > #btn-duel-room {
+  #hud-left > #btn-duel-room,
+  #hud-left > #btn-ai-difficulty {
     display: none;
   }
 
   .status-pill {
-    padding: 7px 10px;
-    font-size: 0.74rem;
-    gap: 6px;
+    padding: 6px 8px;
+    font-size: 0.7rem;
+    gap: 5px;
     min-width: 0;
-    flex: 0 1 auto;
+    flex: 1 1 auto;
   }
 
   #turn-text {
@@ -828,11 +891,11 @@ body.cinematic-ui-hidden #piece-inspect-card {
     display: none;
   }
 
-  #btn-ai-difficulty,
+  #btn-game-variant,
   .menu-toggle-trigger {
     min-height: 36px;
-    padding: 6px 10px;
-    font-size: 0.73rem;
+    padding: 5px 8px;
+    font-size: 0.7rem;
     white-space: nowrap;
     flex-shrink: 0;
   }
@@ -893,7 +956,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
 
   #hud-right .hud-btn {
     min-height: 42px;
-    font-size: 0.78rem;
+    font-size: 0.76rem;
   }
 
   /* Optimize bottom HUD on mobile: hide desktop controls hint bar, stack captured tray + 1-thumb quick dock */
@@ -920,7 +983,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
 
   .mobile-quick-dock {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(12, minmax(0, 1fr));
     gap: 5px;
     width: 100%;
     max-width: 460px;
@@ -937,15 +1000,24 @@ body.cinematic-ui-hidden #piece-inspect-card {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 40px;
-    padding: 6px 4px;
+    min-height: 38px;
+    padding: 5px 4px;
     border-radius: 10px;
-    font-size: 0.68rem;
+    font-size: 0.67rem;
     font-weight: 700;
     letter-spacing: 0.01em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* Row 1: 3 primary buttons (span 4 each = 12 cols); Row 2: 4 action buttons (span 3 each = 12 cols) */
+  .mobile-dock-btn:nth-child(-n+3) {
+    grid-column: span 4;
+  }
+
+  .mobile-dock-btn:nth-child(n+4) {
+    grid-column: span 3;
   }
 
   .promotion-modal,
@@ -1003,17 +1075,20 @@ body.cinematic-ui-hidden #piece-inspect-card {
 
   .mobile-quick-dock {
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 5px;
-    max-width: 480px;
+    max-width: 540px;
     padding: 4px 6px;
     border-radius: 12px;
     pointer-events: auto;
   }
 
-  .mobile-dock-btn {
+  .mobile-dock-btn,
+  .mobile-dock-btn:nth-child(-n+3),
+  .mobile-dock-btn:nth-child(n+4) {
+    grid-column: span 1;
     min-height: 34px;
-    font-size: 0.66rem;
+    font-size: 0.65rem;
     padding: 4px 4px;
   }
 
@@ -1047,21 +1122,219 @@ body.cinematic-ui-hidden #piece-inspect-card {
 
   .status-pill {
     padding: 6px 9px;
-    font-size: 0.72rem;
+    font-size: 0.71rem;
   }
 
-  .mobile-controls-trigger {
-    padding: 6px 11px;
-    font-size: 0.74rem;
+  #btn-game-variant,
+  .menu-toggle-trigger {
+    padding: 6px 8px;
+    font-size: 0.70rem;
   }
+}
 
-  #btn-side-toggle {
-    grid-column: span 6;
+/* =========================================================================
+   3D Game Arena Mode Selector Hub (#game-selector-overlay)
+   ========================================================================= */
+#game-selector-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 36;
+  background: rgba(5, 7, 13, 0.72);
+  backdrop-filter: blur(7px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+#game-selector-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.game-selector-card {
+  width: min(920px, 95vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 20px 24px 18px;
+  text-align: center;
+}
+
+.arena-selector-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 14px 0 6px;
+}
+
+.arena-choice-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1.5px solid rgba(212, 175, 55, 0.34);
+  background: linear-gradient(180deg, rgba(16, 20, 32, 0.92) 0%, rgba(9, 12, 20, 0.96) 100%);
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.arena-choice-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(245, 215, 110, 0.85);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.75), 0 0 22px rgba(212, 175, 55, 0.28);
+}
+
+.arena-choice-card.selected {
+  border-color: #f5d76e;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.78), 0 0 24px rgba(212, 175, 55, 0.36);
+}
+
+.arena-choice-card.xiangqi-card:hover,
+.arena-choice-card.xiangqi-card.selected {
+  border-color: #fbbf24;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.82), 0 0 26px rgba(239, 68, 68, 0.38);
+}
+
+.arena-preview-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #070a11;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.32);
+}
+
+.arena-demo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.35s ease;
+}
+
+.arena-choice-card:hover .arena-demo-img {
+  transform: scale(1.04);
+}
+
+.arena-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+}
+
+.arena-badge.chess-badge {
+  background: rgba(14, 18, 28, 0.86);
+  border: 1px solid rgba(245, 215, 110, 0.72);
+  color: #fde68a;
+}
+
+.arena-badge.xiangqi-badge {
+  background: rgba(127, 29, 29, 0.88);
+  border: 1px solid rgba(251, 191, 36, 0.82);
+  color: #fef08a;
+}
+
+.arena-active-pill {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  background: rgba(16, 185, 129, 0.88);
+  color: #ecfdf5;
+  border: 1px solid rgba(167, 243, 208, 0.75);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.65);
+}
+
+.arena-choice-card.xiangqi-card:not(.selected) .arena-active-pill {
+  background: linear-gradient(135deg, #dc2626, #b45309);
+  color: #fffbeb;
+  border-color: #fde68a;
+}
+
+.arena-card-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  padding: 13px 15px 15px;
+  gap: 8px;
+}
+
+.arena-card-title {
+  font-size: 1.02rem;
+  font-weight: 800;
+  color: var(--gold-bright);
+  letter-spacing: 0.02em;
+}
+
+.arena-card-desc {
+  font-size: 0.75rem;
+  color: var(--text);
+  line-height: 1.42;
+  opacity: 0.92;
+}
+
+.arena-card-desc strong {
+  color: #fde68a;
+}
+
+.arena-feature-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.arena-tag {
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 2.5px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  color: #e2e8f0;
+}
+
+.arena-cta-btn {
+  margin-top: auto;
+  width: 100%;
+  padding: 9px 14px;
+  font-size: 0.8rem;
+  border-radius: 8px;
+}
+
+.arena-cta-btn.xiangqi-cta {
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.42), rgba(212, 175, 55, 0.25));
+  border-color: #fbbf24;
+  color: #fef08a;
+}
+
+.arena-cta-btn.xiangqi-cta:hover {
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.62), rgba(212, 175, 55, 0.38));
+}
+
+@media (max-width: 768px) {
+  .game-selector-card {
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    padding: 15px 14px 16px;
   }
-
-  #btn-ai-move,
-  #btn-reset {
-    grid-column: span 3;
+  .arena-selector-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 }
 
@@ -1297,7 +1570,6 @@ body.cinematic-ui-hidden #piece-inspect-card {
   .skin-detail-actions {
     justify-content: center;
   }
-  #btn-piece-skin,
   #btn-skin-shop {
     grid-column: span 3;
   }
@@ -1487,6 +1759,219 @@ body.cinematic-ui-hidden #piece-inspect-card {
     font-size: 0.63rem;
   }
 }
+
+/* Cờ Tướng 3D (Sở Hà — Hán Giới) Faction Badge & Turn Dot Styling */
+body[data-game-variant="xiangqi"] .piece-overhead-badge.faction-w {
+  background: rgba(136, 19, 55, 0.92);
+  color: #fef3c7;
+  border-color: rgba(251, 191, 36, 0.88);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.72), 0 0 10px rgba(225, 29, 72, 0.38);
+}
+
+body[data-game-variant="xiangqi"] .piece-overhead-badge.faction-w .piece-overhead-glyph {
+  color: #fde047;
+}
+
+body[data-game-variant="xiangqi"] .piece-overhead-badge.faction-b {
+  background: rgba(15, 23, 42, 0.94);
+  color: #f8fafc;
+  border-color: rgba(56, 189, 248, 0.76);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.82), 0 0 10px rgba(56, 189, 248, 0.28);
+}
+
+body[data-game-variant="xiangqi"] .piece-overhead-badge.faction-b .piece-overhead-glyph {
+  color: #7dd3fc;
+}
+
+body[data-game-variant="xiangqi"] .piece-overhead-badge.is-pawn-compact {
+  font-size: 0.64rem;
+  padding: 1px 6px;
+  opacity: 0.96;
+}
+
+body[data-game-variant="xiangqi"] .turn-dot:not(.black) {
+  background: #ef4444;
+  border-color: #fde047;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.85);
+}
+
+/* =========================================================================
+   Corner "💬 Đề Xuất" Floating Button & Feedback Modal (PC & Mobile)
+   ========================================================================= */
+.feedback-corner-fab {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  z-index: 42;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 215, 110, 0.78);
+  background: linear-gradient(135deg, rgba(16, 22, 36, 0.94), rgba(120, 53, 15, 0.82));
+  color: #fffbeb;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65), 0 0 16px rgba(212, 175, 55, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  white-space: nowrap;
+}
+
+.feedback-corner-fab:hover {
+  transform: translateY(-2px);
+  border-color: #fde047;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.75), 0 0 22px rgba(250, 204, 21, 0.55);
+}
+
+.feedback-fab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 8px #34d399;
+  flex-shrink: 0;
+}
+
+body.cinematic-ui-hidden .feedback-corner-fab {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.feedback-cta-btn {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.28), rgba(180, 83, 9, 0.32)) !important;
+  border-color: rgba(245, 215, 110, 0.72) !important;
+  color: #fef3c7 !important;
+}
+
+#feedback-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(5, 7, 13, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+
+#feedback-modal-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.feedback-modal-card {
+  width: min(560px, 95vw) !important;
+  max-height: 90dvh;
+  overflow-y: auto;
+  text-align: left !important;
+}
+
+.feedback-modal-card .checkmate-ornament,
+.feedback-modal-card .promotion-title,
+.feedback-modal-card .skin-shop-subtitle {
+  text-align: center;
+}
+
+.feedback-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.feedback-row-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.feedback-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.feedback-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #fde68a;
+  letter-spacing: 0.02em;
+}
+
+.feedback-select,
+.feedback-input,
+.feedback-textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(212, 175, 55, 0.38);
+  background: rgba(8, 12, 22, 0.88);
+  color: #f8fafc;
+  font-family: inherit;
+  font-size: 0.82rem;
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.feedback-select:focus,
+.feedback-input:focus,
+.feedback-textarea:focus {
+  border-color: #f5d76e;
+  box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.22);
+}
+
+.feedback-textarea {
+  resize: vertical;
+  min-height: 88px;
+  line-height: 1.45;
+}
+
+.feedback-status-banner {
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.feedback-status-banner.ok {
+  background: rgba(16, 185, 129, 0.18);
+  border: 1px solid rgba(52, 211, 153, 0.55);
+  color: #a7f3d0;
+}
+
+.feedback-status-banner.err {
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(248, 113, 113, 0.55);
+  color: #fecaca;
+}
+
+@media (max-width: 768px) {
+  .feedback-corner-fab {
+    bottom: auto;
+    top: calc(env(safe-area-inset-top, 0px) + 52px);
+    right: calc(env(safe-area-inset-right, 0px) + 10px);
+    padding: 6px 11px;
+    font-size: 0.72rem;
+  }
+
+  .feedback-row-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 
 
 

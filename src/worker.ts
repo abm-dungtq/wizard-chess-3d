@@ -1,6 +1,11 @@
-import { defaultRoomStore, handleRoomApiRequest } from './roomStore.ts';
+import {
+  defaultRoomStore,
+  handleFeedbackApiRequest,
+  handleRoomApiRequest,
+  type FeedbackSheetConfig
+} from './roomStore.ts';
 
-export interface WorkerEnv {
+export interface WorkerEnv extends FeedbackSheetConfig {
   ASSETS?: {
     fetch(request: Request): Promise<Response>;
   };
@@ -13,6 +18,11 @@ export default {
     if (url.pathname.startsWith('/api/rooms')) {
       const apiRes = await handleRoomApiRequest(request, defaultRoomStore);
       if (apiRes) return apiRes;
+    }
+
+    if (url.pathname.startsWith('/api/feedback')) {
+      const fbRes = await handleFeedbackApiRequest(request, env);
+      if (fbRes) return fbRes;
     }
 
     if (env?.ASSETS) {

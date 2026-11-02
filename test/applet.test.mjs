@@ -15,6 +15,25 @@ import {
   chooseBestAIMove,
   chooseBestAIMoveAsync
 } from '../src/chessAI.ts';
+import {
+  XIANGQI_ROWS,
+  XIANGQI_COLS,
+  XIANGQI_ROLE_METADATA,
+  createEmptyXiangqiBoard,
+  createInitialXiangqiBoard,
+  extractPureXiangqiBoard,
+  isFlyingGeneralExposed,
+  isXiangqiGeneralInCheck,
+  getXiangqiBlockedPointsForPiece,
+  getXiangqiLegalMovesForPiece,
+  getAllXiangqiLegalMoves,
+  applyXiangqiMove,
+  computeXiangqiPositionHash,
+  checkXiangqiInsufficientMaterial,
+  evaluateXiangqiDrawState,
+  chooseBestXiangqiMove,
+  chooseBestXiangqiMoveAsync
+} from '../src/xiangqiAI.ts';
 import { wizardAudio, WizardAudioEngine } from '../src/soundEngine.ts';
 import { RoomStore, handleRoomApiRequest } from '../src/roomStore.ts';
 
@@ -1465,6 +1484,322 @@ test('19. Steady 3D Combat Camera (No Zoom-In/Out Sickness) & 3-Layer Piece Iden
     'Engine must update overhead role badges, support clicking/tapping enemy pieces to inspect their name/moves, and expose inspectSquare'
   );
 });
+
+test('20. Newly Sculpted 3D Xiangqi Assets: All 7 .glb.gz.b64 models decompress, parse via GLTFLoader, and contain 4-bone PieceArmature + 4 animation clips', async () => {
+  const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
+  const loader = new GLTFLoader();
+  const xiangqiPieceFiles = [
+    'king_white',
+    'advisor_white',
+    'elephant_white',
+    'rook_white',
+    'cannon_white',
+    'knight_white',
+    'pawn_white'
+  ];
+
+  for (const name of xiangqiPieceFiles) {
+    const b64Path = path.join(ROOT, 'public/assets/glb/xiangqi', `${name}.glb.gz.b64`);
+    assert.ok(fs.existsSync(b64Path), `Missing sculpted Xiangqi 3D asset: ${b64Path}`);
+    const b64Text = fs.readFileSync(b64Path, 'utf-8').trim();
+    assert.ok(b64Text.length > 5000, `Xiangqi asset ${name}.glb.gz.b64 is unexpectedly small (${b64Text.length} chars)`);
+
+    const gzBuf = Buffer.from(b64Text, 'base64');
+    const glbBuf = zlib.gunzipSync(gzBuf);
+    assert.equal(glbBuf.toString('ascii', 0, 4), 'glTF', `Invalid glTF magic header for xiangqi/${name}`);
+    assert.equal(glbBuf.readUInt32LE(4), 2, `Invalid glTF version for xiangqi/${name}`);
+    assert.equal(glbBuf.readUInt32LE(8), glbBuf.length, `Mismatched glTF byte length for xiangqi/${name}`);
+
+    const ab = glbBuf.buffer.slice(glbBuf.byteOffset, glbBuf.byteOffset + glbBuf.byteLength);
+    const gltf = await new Promise((resolve, reject) => loader.parse(ab, '', resolve, reject));
+
+    const clipNames = gltf.animations.map((a) => a.name).sort();
+    assert.deepEqual(
+      clipNames,
+      ['Attack', 'Idle', 'Move', 'Shatter'],
+      `Xiangqi ${name} must contain Attack, Idle, Move, and Shatter clips`
+    );
+
+    const boneNames = new Set();
+    let meshCount = 0;
+    gltf.scene.traverse((child) => {
+      if (child.isBone) boneNames.add(child.name);
+      if (child.isMesh) meshCount++;
+    });
+    assert.ok(boneNames.has('Base'), `Xiangqi ${name} must include stationary "Base" rig bone`);
+    assert.ok(boneNames.size >= 3, `Xiangqi ${name} must include multi-bone armature (got ${boneNames.size})`);
+    assert.ok(meshCount >= 2, `Xiangqi ${name} must contain sculpted mesh geometry`);
+  }
+});
+
+test('21. Xiangqi Rules Engine (src/xiangqiAI.ts): 9x10 Board, 44 Opening Moves, Cannon Screen, Horse Leg Block, Elephant Eye & River, Nine Palace, Flying General & Stalemate=Loss', async () => {
+  assert.equal(XIANGQI_ROWS, 10);
+  assert.equal(XIANGQI_COLS, 9);
+
+  // 1. Initial 10x9 board setup (32 pieces) & 44 legal opening moves for Red ('w')
+  const initBoard = createInitialXiangqiBoard();
+  let pieceCount = 0;
+  for (let r = 0; r < 10; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (initBoard[r][c]) pieceCount++;
+    }
+  }
+  assert.equal(pieceCount, 32, 'Initial Xiangqi board must have 32 pieces');
+  const redOpeningMoves = getAllXiangqiLegalMoves(initBoard, 'w');
+  const blackOpeningMoves = getAllXiangqiLegalMoves(initBoard, 'b');
+  assert.equal(redOpeningMoves.length, 44, 'Standard Xiangqi opening position must have exactly 44 legal moves for Red');
+  assert.equal(blackOpeningMoves.length, 44, 'Standard Xiangqi opening position must have 44 legal moves for Black');
+
+  // 2. Cannon (Pháo) non-capture slide (0 screens) vs screen-jump capture (1 screen)
+  const cannonBoard = createEmptyXiangqiBoard();
+  cannonBoard[9][4] = { type: 'king', color: 'w', hasMoved: false };
+  cannonBoard[0][3] = { type: 'king', color: 'b', hasMoved: false };
+  cannonBoard[7][1] = { type: 'cannon', color: 'w', hasMoved: false };
+  // Screen piece at (4, 1), enemy Rook target at (1, 1), and another piece behind at (0, 1)
+  cannonBoard[4][1] = { type: 'pawn', color: 'w', hasMoved: false };
+  cannonBoard[1][1] = { type: 'rook', color: 'b', hasMoved: false };
+  cannonBoard[0][1] = { type: 'knight', color: 'b', hasMoved: false };
+
+  const cannonMoves = getXiangqiLegalMovesForPiece(cannonBoard, 7, 1);
+  // Can slide freely to (6,1) and (5,1) before screen at (4,1), cannot land on (3,1) or (2,1), can capture (1,1) over screen (4,1), cannot capture (0,1) (2 screens)
+  assert.ok(cannonMoves.some((m) => m.r === 6 && m.c === 1 && !m.capture));
+  assert.ok(cannonMoves.some((m) => m.r === 5 && m.c === 1 && !m.capture));
+  assert.ok(!cannonMoves.some((m) => m.r === 3 && m.c === 1));
+  assert.ok(!cannonMoves.some((m) => m.r === 2 && m.c === 1));
+  const screenCap = cannonMoves.find((m) => m.r === 1 && m.c === 1);
+  assert.ok(screenCap && screenCap.capture, 'Cannon must capture enemy Rook at (1,1) by jumping over screen at (4,1)');
+  assert.equal(screenCap.screenR, 4);
+  assert.equal(screenCap.screenC, 1);
+  assert.ok(!cannonMoves.some((m) => m.r === 0 && m.c === 1), 'Cannon must not jump over 2 screens');
+
+  // 3. Horse (Mã) Hobbling the Horse's Leg (Cản Mã)
+  const horseBoard = createEmptyXiangqiBoard();
+  horseBoard[9][4] = { type: 'king', color: 'w', hasMoved: false };
+  horseBoard[0][3] = { type: 'king', color: 'b', hasMoved: false };
+  horseBoard[5][4] = { type: 'knight', color: 'w', hasMoved: true };
+  // Place a blocker immediately north of the Horse at (4, 4) -> blocks jumps to (3, 3) and (3, 5)
+  horseBoard[4][4] = { type: 'pawn', color: 'b', hasMoved: true };
+
+  const horseBlockedInfo = getXiangqiBlockedPointsForPiece(horseBoard, 5, 4);
+  assert.equal(horseBlockedInfo.length, 1);
+  assert.deepEqual(horseBlockedInfo[0], { r: 4, c: 4, kind: 'horse_leg' });
+
+  const horseMoves = getXiangqiLegalMovesForPiece(horseBoard, 5, 4);
+  assert.ok(!horseMoves.some((m) => m.r === 3 && (m.c === 3 || m.c === 5)), 'Blocked north leg must forbid (3,3) and (3,5)');
+  const southJump = horseMoves.find((m) => m.r === 7 && m.c === 5);
+  assert.ok(southJump, 'Unblocked south leg must allow jump to (7,5)');
+  assert.equal(southJump.legR, 6);
+  assert.equal(southJump.legC, 4);
+
+  // 4. Elephant (Tượng) Blocking the Elephant's Eye (Chặn Mắt Tượng) & River Boundary
+  const elBoard = createEmptyXiangqiBoard();
+  elBoard[9][4] = { type: 'king', color: 'w', hasMoved: false };
+  elBoard[0][3] = { type: 'king', color: 'b', hasMoved: false };
+  elBoard[7][4] = { type: 'elephant', color: 'w', hasMoved: true };
+  // Block northeast eye at (6, 5) -> forbids (5, 6)
+  elBoard[6][5] = { type: 'pawn', color: 'w', hasMoved: false };
+  const elBlockedInfo = getXiangqiBlockedPointsForPiece(elBoard, 7, 4);
+  assert.equal(elBlockedInfo.length, 1);
+  assert.deepEqual(elBlockedInfo[0], { r: 6, c: 5, kind: 'elephant_eye' });
+
+  const elMoves = getXiangqiLegalMovesForPiece(elBoard, 7, 4);
+  assert.ok(!elMoves.some((m) => m.r === 5 && m.c === 6), 'Blocked Elephant eye at (6,5) must forbid (5,6)');
+  assert.ok(elMoves.some((m) => m.r === 5 && m.c === 2), 'Unblocked Elephant eye at (6,3) must allow (5,2)');
+
+  // Move Red Elephant to river bank (5, 2) -> must NOT cross river to r=3
+  elBoard[7][4] = null;
+  elBoard[5][2] = { type: 'elephant', color: 'w', hasMoved: true };
+  const riverElMoves = getXiangqiLegalMovesForPiece(elBoard, 5, 2);
+  assert.ok(riverElMoves.every((m) => m.r >= 5), 'Red Elephant must never cross the river into r < 5');
+
+  // 5. Nine Palace confinement for General & Advisor + Flying General (Lộ Mặt Tướng) prohibition
+  const palaceBoard = createEmptyXiangqiBoard();
+  palaceBoard[9][4] = { type: 'king', color: 'w', hasMoved: false };
+  palaceBoard[8][4] = { type: 'advisor', color: 'w', hasMoved: true };
+  palaceBoard[0][4] = { type: 'king', color: 'b', hasMoved: false };
+  assert.equal(isFlyingGeneralExposed(palaceBoard), false, 'Advisor at (8,4) screens the two Generals');
+
+  // Because Red Advisor at (8,4) is the only piece between the two Generals on file c=4,
+  // moving the Advisor diagonally off c=4 would expose Flying General and must be illegal!
+  const pinnedAdvisorMoves = getXiangqiLegalMovesForPiece(palaceBoard, 8, 4);
+  assert.equal(pinnedAdvisorMoves.length, 0, 'Advisor pinned between opposing Generals must have 0 legal moves');
+
+  // 6. Soldier (Tốt/Binh) before vs after crossing the river
+  const pawnBoard = createEmptyXiangqiBoard();
+  pawnBoard[9][4] = { type: 'king', color: 'w', hasMoved: false };
+  pawnBoard[0][3] = { type: 'king', color: 'b', hasMoved: false };
+  pawnBoard[6][0] = { type: 'pawn', color: 'w', hasMoved: false }; // Before river (r=6)
+  pawnBoard[4][4] = { type: 'pawn', color: 'w', hasMoved: true };  // Crossed river (r=4)
+  assert.equal(getXiangqiLegalMovesForPiece(pawnBoard, 6, 0).length, 1, 'Un-crossed Soldier can only step forward');
+  const crossedMoves = getXiangqiLegalMovesForPiece(pawnBoard, 4, 4);
+  assert.equal(crossedMoves.length, 3, 'River-crossed Soldier can step forward, left, or right (never backward)');
+
+  // 7. Stalemate in Xiangqi is a LOSS (not a draw!) + AI search finds forced checkmate
+  const staleBoard = createEmptyXiangqiBoard();
+  staleBoard[9][4] = { type: 'king', color: 'w', hasMoved: false };
+  staleBoard[0][3] = { type: 'king', color: 'b', hasMoved: true };
+  // Red Rook at (1, 5) controls rank 1; Red Rook at (2, 4) controls file 4 -> Black King at (0, 3) is NOT in check,
+  // but its only adjacent Palace squares (1, 3) and (0, 4) are both controlled -> Black has 0 legal moves!
+  staleBoard[1][5] = { type: 'rook', color: 'w', hasMoved: true };
+  staleBoard[2][4] = { type: 'rook', color: 'w', hasMoved: true };
+  assert.equal(isXiangqiGeneralInCheck(staleBoard, 'b'), false, 'Black General at (0,3) is not currently in check');
+  assert.equal(getAllXiangqiLegalMoves(staleBoard, 'b').length, 0, 'Black has 0 legal moves (stalemated)');
+  const staleDrawEval = evaluateXiangqiDrawState(staleBoard, 'b', 0, []);
+  assert.equal(staleDrawEval.isDraw, false, 'Stalemate in Xiangqi is a win/loss, not a draw');
+
+  // AI Mate-in-1 test: Red Rook on (2, 0) slides to (0, 0) to deliver back-rank checkmate against Black King at (0, 4) whose only orthogonal step off rank 0 is blocked by its own Elephant at (1, 4)
+  const mateBoard = createEmptyXiangqiBoard();
+  mateBoard[9][4] = { type: 'king', color: 'w', hasMoved: false };
+  mateBoard[0][4] = { type: 'king', color: 'b', hasMoved: false };
+  mateBoard[1][4] = { type: 'elephant', color: 'b', hasMoved: true }; // Blocks (1,4) and screens Flying General
+  mateBoard[2][0] = { type: 'rook', color: 'w', hasMoved: true };
+
+  const syncXiangqiMate = chooseBestXiangqiMove(mateBoard, 'w', 'grandmaster');
+  const asyncXiangqiMate = await chooseBestXiangqiMoveAsync(mateBoard, 'w', 'grandmaster', { timeSliceMs: 2 });
+  assert.ok(syncXiangqiMate && asyncXiangqiMate, 'Sync and Async Xiangqi AI must return a move');
+  assert.equal(syncXiangqiMate.fromR, 2);
+  assert.equal(syncXiangqiMate.fromC, 0);
+  assert.equal(syncXiangqiMate.toR, 0);
+  assert.equal(syncXiangqiMate.toC, 0);
+  assert.deepEqual(asyncXiangqiMate, syncXiangqiMate);
+
+  // Verify Insufficient Material, 60-Move Rule, and Threefold Repetition
+  const bareKings = createEmptyXiangqiBoard();
+  bareKings[9][4] = { type: 'king', color: 'w' };
+  bareKings[0][4] = { type: 'king', color: 'b' };
+  bareKings[8][4] = { type: 'advisor', color: 'w' };
+  assert.equal(checkXiangqiInsufficientMaterial(bareKings), true, 'General + Advisor vs General has no attacking pieces');
+  const hash = computeXiangqiPositionHash(bareKings, 'w');
+  assert.equal(evaluateXiangqiDrawState(bareKings, 'w', 120, []).reason, '60-Move Rule');
+  assert.equal(evaluateXiangqiDrawState(bareKings, 'w', 4, [hash, hash, hash]).reason, 'Threefold Repetition');
+});
+
+test('22. Dual-Mode 3D Engine, Audio & RoomStore Integration (Cờ Vua 8x8 <-> Cờ Tướng 9x10 Sở Hà Hán Giới)', async () => {
+  const appTsx = fs.readFileSync(path.join(ROOT, 'src/App.tsx'), 'utf-8');
+  const engineJs = fs.readFileSync(path.join(ROOT, 'src/wizardChessEngine.js'), 'utf-8');
+
+  assert.ok(
+    appTsx.includes('id="btn-game-variant"') &&
+      appTsx.includes('id="btn-quick-variant"') &&
+      appTsx.includes('id="game-selector-overlay"') &&
+      appTsx.includes('id="card-select-chess"') &&
+      appTsx.includes('id="card-select-xiangqi"') &&
+      appTsx.includes('/assets/demo-chess-arena.jpg') &&
+      appTsx.includes('/assets/demo-xiangqi-arena.jpg'),
+    'App.tsx must expose #game-selector-overlay with both 3D arena demo images (/assets/demo-chess-arena.jpg & /assets/demo-xiangqi-arena.jpg) and #btn-game-variant'
+  );
+  assert.ok(
+    fs.existsSync(path.join(ROOT, 'public/assets/demo-chess-arena.jpg')) &&
+      fs.existsSync(path.join(ROOT, 'public/assets/demo-xiangqi-arena.jpg')),
+    'Both 3D arena demo images must exist in public/assets/'
+  );
+  assert.ok(
+    engineJs.includes('function buildXiangqiBoardGrid()') &&
+      engineJs.includes('function ensureXiangqiModelsLoaded()') &&
+      engineJs.includes('function setGameVariant(nextVariant)') &&
+      engineJs.includes('function toggleGameVariant()') &&
+      engineJs.includes('function openGameSelectorModal()') &&
+      engineJs.includes('function closeGameSelectorModal()') &&
+      engineJs.includes('XIANGQI_ROLE_METADATA') &&
+      !engineJs.includes('getXiangqiBlockedPointsForPiece(r, c,'),
+    'wizardChessEngine.js must implement buildXiangqiBoardGrid, ensureXiangqiModelsLoaded, setGameVariant, toggleGameVariant, openGameSelectorModal, closeGameSelectorModal, and pass (cells, r, c) to getXiangqiBlockedPointsForPiece'
+  );
+
+  // Verify XIANGQI_ROLE_METADATA provides all 3-Layer Overhead & Inspect Card fields for all 7 piece types with Red (Hồng) vs Black (Hắc) traditional names
+  const expectedFactionNames = {
+    king: { shortViW: 'Soái', shortViB: 'Tướng', glyphW: '帥', glyphB: '將' },
+    advisor: { shortViW: 'Sĩ', shortViB: 'Sĩ', glyphW: '仕', glyphB: '士' },
+    elephant: { shortViW: 'Tịnh', shortViB: 'Tượng', glyphW: '相', glyphB: '象' },
+    rook: { shortViW: 'Xe', shortViB: 'Xe', glyphW: '俥', glyphB: '車' },
+    cannon: { shortViW: 'Pháo', shortViB: 'Pháo', glyphW: '炮', glyphB: '砲' },
+    knight: { shortViW: 'Mã', shortViB: 'Mã', glyphW: '傌', glyphB: '馬' },
+    pawn: { shortViW: 'Binh', shortViB: 'Tốt', glyphW: '兵', glyphB: '卒' }
+  };
+  for (const [xRole, expected] of Object.entries(expectedFactionNames)) {
+    const meta = XIANGQI_ROLE_METADATA[xRole];
+    assert.ok(meta, `Missing XIANGQI_ROLE_METADATA for ${xRole}`);
+    assert.ok(meta.viName && meta.enName && meta.shortVi, `XIANGQI_ROLE_METADATA.${xRole} must define viName, enName, shortVi`);
+    assert.ok(meta.viNameW && meta.viNameB, `XIANGQI_ROLE_METADATA.${xRole} must define viNameW and viNameB`);
+    assert.equal(meta.shortViW, expected.shortViW, `Red shortViW mismatch for ${xRole}`);
+    assert.equal(meta.shortViB, expected.shortViB, `Black shortViB mismatch for ${xRole}`);
+    assert.equal(meta.glyphW, expected.glyphW, `Red glyphW mismatch for ${xRole}`);
+    assert.equal(meta.glyphB, expected.glyphB, `Black glyphB mismatch for ${xRole}`);
+    assert.ok(meta.moveHint, `XIANGQI_ROLE_METADATA.${xRole} must define moveHint`);
+  }
+
+  assert.ok(
+    engineJs.includes('const XIANGQI_DEFAULT_FACTION_MATERIALS = {') &&
+      engineJs.includes("shouldShow = gameVariant === 'xiangqi' ? true : p.type !== 'pawn';") &&
+      engineJs.includes('Lộ ${9 - activeSq.c} (Đỏ)') &&
+      engineJs.includes('Lượt Phe Đỏ (Hồng)') &&
+      engineJs.includes('Tuyệt Sát (Chiếu Bí)'),
+    'wizardChessEngine.js must apply Chu Sa/Hắc Ngọc faction materials, show all 32 piece badges in Xiangqi smart mode, use traditional Red/Black Lộ coordinates, and display Xiangqi HUD terminology'
+  );
+
+  // Verify 3D Piece Visual Differentiation (Knight Steed split, Role-Specific Materials, Anisotropic Silhouette, Role Regalia, and Idea #1 Segmented Switcher + Material Advantage)
+  assert.ok(
+    engineJs.includes('function splitKnightSteedSubMesh(sceneRoot)') &&
+      engineJs.includes('isSteedMesh: true') &&
+      engineJs.includes('const whiteSteedMat =') &&
+      engineJs.includes('const blackSteedMat =') &&
+      engineJs.includes('const whiteQueenAccentMat =') &&
+      engineJs.includes('const whiteBishopAccentMat =') &&
+      engineJs.includes('function attachPieceRoleRegalia(pieceObj)') &&
+      engineJs.includes('function applyPieceBaseScale(mesh, type, mulXZ = 1, mulY = 1)') &&
+      engineJs.includes('function computeMaterialAdvantage()'),
+    'wizardChessEngine.js must implement splitKnightSteedSubMesh, contrasting steed & role materials, attachPieceRoleRegalia, applyPieceBaseScale, and computeMaterialAdvantage'
+  );
+  assert.ok(
+    appTsx.includes('id="variant-segmented-pill"') &&
+      appTsx.includes('data-set-variant="chess"') &&
+      appTsx.includes('data-set-variant="xiangqi"') &&
+      appTsx.includes('id="btn-feedback-fab"') &&
+      appTsx.includes('id="feedback-modal-overlay"'),
+    'App.tsx must include the 1-tap #variant-segmented-pill switcher and the corner #btn-feedback-fab + #feedback-modal-overlay'
+  );
+
+  // Verify WizardAudioEngine synthesizes signature attacks for Cannon, Elephant, and Advisor
+  const synth = new WizardAudioEngine();
+  for (const xType of ['cannon', 'elephant', 'advisor']) {
+    synth.playSignatureAttack(xType, 'contact1');
+    assert.equal(synth.getState().lastCue, `sig_${xType}_contact1`);
+    synth.playSignatureAttack(xType, 'finisher');
+    assert.equal(synth.getState().lastCue, `sig_${xType}_finisher`);
+  }
+
+  // Verify RoomStore accepts 10x9 Xiangqi coordinates (r=9, c=8) and gameVariant='xiangqi'
+  const store = new RoomStore();
+  const createRes = await handleRoomApiRequest(
+    new Request('http://localhost/api/rooms/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferredColor: 'w', playerToken: 'tok_xq_red', gameVariant: 'xiangqi' })
+    }),
+    store
+  );
+  const created = await createRes.json();
+  assert.equal(created.ok, true);
+  assert.equal(created.room.gameVariant, 'xiangqi');
+
+  const moveRes = await handleRoomApiRequest(
+    new Request(`http://localhost/api/rooms/${created.code}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerToken: 'tok_xq_red',
+        color: 'w',
+        from: { r: 9, c: 8 },
+        to: { r: 7, c: 8 }
+      })
+    }),
+    store
+  );
+  const moveData = await moveRes.json();
+  assert.equal(moveData.ok, true);
+  assert.equal(moveData.room.moves.length, 1);
+  assert.deepEqual(moveData.room.moves[0].from, { r: 9, c: 8 });
+});
+
 
 
 

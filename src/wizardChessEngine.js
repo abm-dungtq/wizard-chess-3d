@@ -12,6 +12,19 @@ import {
   chooseBestAIMove,
   chooseBestAIMoveAsync
 } from './chessAI.ts';
+import {
+  createInitialXiangqiBoard,
+  extractPureXiangqiBoard,
+  getXiangqiLegalMovesForPiece,
+  getAllXiangqiLegalMoves,
+  getXiangqiBlockedPointsForPiece,
+  isXiangqiGeneralInCheck,
+  computeXiangqiPositionHash,
+  evaluateXiangqiDrawState,
+  chooseBestXiangqiMove,
+  chooseBestXiangqiMoveAsync,
+  XIANGQI_ROLE_METADATA
+} from './xiangqiAI.ts';
 import { wizardAudio } from './soundEngine.ts';
 
 /** @type {any} */
@@ -20,23 +33,86 @@ const SkeletonUtils = { clone: cloneSkeleton };
 
 export function initWizardChess() {
     // =========================================================================
-    // Constants & Board Coordinates
+    // Constants & Board Coordinates (Dual-Mode: 8x8 Chess & 9x10 Xiangqi)
     // =========================================================================
     const PIECE_TYPES = ['pawn', 'rook', 'knight', 'bishop', 'queen', 'king'];
-    const PIECE_VALUES = { pawn: 100, knight: 320, bishop: 330, rook: 500, queen: 900, king: 20000 };
+    const XIANGQI_PIECE_TYPES = ['king', 'advisor', 'elephant', 'rook', 'cannon', 'knight', 'pawn'];
+    const PIECE_VALUES = {
+      pawn: 100,
+      advisor: 200,
+      elephant: 200,
+      knight: 320,
+      bishop: 330,
+      cannon: 450,
+      rook: 500,
+      queen: 900,
+      king: 20000
+    };
     const BOARD_SQ_SIZE = 0.44;
     const PIECE_SCALE_FACTOR = 0.66;
+    const XIANGQI_SQ_SIZE = 0.38;
+    const XIANGQI_SCALE_FACTOR = 0.61;
     const BOARD_SURFACE_Y = 0.775;
+    let gameVariant = 'chess'; // 'chess' | 'xiangqi'
+    function getBoardRows() {
+      return gameVariant === 'xiangqi' ? 10 : 8;
+    }
+    function getBoardCols() {
+      return gameVariant === 'xiangqi' ? 9 : 8;
+    }
+    function getActiveSqSize() {
+      return gameVariant === 'xiangqi' ? XIANGQI_SQ_SIZE : BOARD_SQ_SIZE;
+    }
     const ROLE_SCALE_MULTIPLIERS = {
       pawn: 0.85,
+      advisor: 0.94,
       knight: 0.96,
+      cannon: 0.97,
       bishop: 0.98,
+      elephant: 1.00,
       rook: 1.02,
       queen: 1.08,
       king: 1.15
     };
+    const ROLE_ANISOTROPIC_RATIOS = {
+      chess: {
+        pawn:     { sx: 0.96, sy: 0.96, sz: 0.96 },
+        knight:   { sx: 1.04, sy: 1.02, sz: 1.08 },
+        bishop:   { sx: 0.90, sy: 1.00, sz: 0.90 },
+        rook:     { sx: 1.06, sy: 1.00, sz: 1.06 },
+        queen:    { sx: 0.85, sy: 1.04, sz: 0.85 },
+        king:     { sx: 1.16, sy: 1.25, sz: 1.16 }
+      },
+      xiangqi: {
+        pawn:     { sx: 0.94, sy: 0.94, sz: 0.94 },
+        cannon:   { sx: 1.04, sy: 0.98, sz: 1.06 },
+        knight:   { sx: 1.04, sy: 1.02, sz: 1.08 },
+        elephant: { sx: 1.14, sy: 0.96, sz: 1.14 },
+        advisor:  { sx: 0.84, sy: 0.90, sz: 0.84 },
+        rook:     { sx: 1.06, sy: 1.00, sz: 1.06 },
+        king:     { sx: 1.16, sy: 1.25, sz: 1.16 }
+      }
+    };
     function getPieceWorldScale(type) {
+      if (gameVariant === 'xiangqi') {
+        return XIANGQI_SQ_SIZE * XIANGQI_SCALE_FACTOR * (ROLE_SCALE_MULTIPLIERS[type] || 1.0);
+      }
       return BOARD_SQ_SIZE * PIECE_SCALE_FACTOR * (ROLE_SCALE_MULTIPLIERS[type] || 1.0);
+    }
+    function getPieceAnisotropicScale(type) {
+      const base = getPieceWorldScale(type);
+      const map = gameVariant === 'xiangqi' ? ROLE_ANISOTROPIC_RATIOS.xiangqi : ROLE_ANISOTROPIC_RATIOS.chess;
+      const ratio = map[type] || { sx: 1, sy: 1, sz: 1 };
+      return {
+        sx: base * ratio.sx,
+        sy: base * ratio.sy,
+        sz: base * ratio.sz
+      };
+    }
+    function applyPieceBaseScale(mesh, type, mulXZ = 1, mulY = 1) {
+      if (!mesh) return;
+      const { sx, sy, sz } = getPieceAnisotropicScale(type);
+      mesh.scale.set(sx * mulXZ, sy * mulY, sz * mulXZ);
     }
     const PIECE_ROLE_METADATA = {
       pawn: {
@@ -86,11 +162,23 @@ export function initWizardChess() {
         glyphW: '♔',
         glyphB: '♚',
         moveHint: 'Đi 1 ô mọi hướng • Mất Vua là thua ván cờ'
-      }
+      },
+      advisor: XIANGQI_ROLE_METADATA.advisor,
+      elephant: XIANGQI_ROLE_METADATA.elephant,
+      cannon: XIANGQI_ROLE_METADATA.cannon
     };
+    function getRoleMetadata(type) {
+      if (gameVariant === 'xiangqi' && XIANGQI_ROLE_METADATA[type]) {
+        return XIANGQI_ROLE_METADATA[type];
+      }
+      return PIECE_ROLE_METADATA[type] || PIECE_ROLE_METADATA.pawn;
+    }
     const PIECE_HEIGHTS = {
       pawn: 0.30,
+      advisor: 0.37,
+      cannon: 0.35,
       rook: 0.39,
+      elephant: 0.41,
       knight: 0.42,
       bishop: 0.43,
       queen: 0.46,
@@ -100,6 +188,13 @@ export function initWizardChess() {
     const MELEE_STANDOFF = 0.36; // Optimal melee standoff for 0.44m squares so weapon blades cleave cleanly into defender before burst
 
     function boardToWorld(r, c) {
+      if (gameVariant === 'xiangqi') {
+        return new THREE.Vector3(
+          (c - 4.0) * XIANGQI_SQ_SIZE,
+          BOARD_SURFACE_Y,
+          (r - 4.5) * XIANGQI_SQ_SIZE
+        );
+      }
       return new THREE.Vector3(
         (c - 3.5) * BOARD_SQ_SIZE,
         BOARD_SURFACE_Y,
@@ -223,7 +318,7 @@ export function initWizardChess() {
     }
 
     const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.22, 65);
-    camera.position.set(0, 3.82, 3.58);
+    camera.position.set(0, 7.35, 3.95);
 
     function getPortraitFramingFactor() {
       const w = Math.max(1, window.innerWidth || 1280);
@@ -660,10 +755,10 @@ export function initWizardChess() {
         Array.isArray(boardState)
       ) {
         const pieceRad = 0.185;
-        for (let r = 0; r < 8; r++) {
+        for (let r = 0; r < boardState.length; r++) {
           const row = boardState[r];
           if (!row) continue;
-          for (let c = 0; c < 8; c++) {
+          for (let c = 0; c < row.length; c++) {
             const pc = row[c];
             if (!pc || !pc.mesh || !pc.mesh.parent) continue;
             const px = pc.mesh.position.x;
@@ -1051,9 +1146,78 @@ export function initWizardChess() {
       emissiveIntensity: 0.38
     });
 
+    // Distinct Warhorse Coat Materials (White/Red Knight vs Black Knight) & Role-Specific Royal Regalia Accents
+    const whiteSteedMat = new THREE.MeshStandardMaterial({
+      color: 0x9a3412,
+      roughness: 0.24,
+      metalness: 0.24,
+      emissive: 0x451a03,
+      emissiveIntensity: 0.28
+    });
+    const blackSteedMat = new THREE.MeshStandardMaterial({
+      color: 0xe2e8f0,
+      roughness: 0.20,
+      metalness: 0.38,
+      emissive: 0x1e293b,
+      emissiveIntensity: 0.28
+    });
+    const whiteQueenAccentMat = new THREE.MeshStandardMaterial({
+      color: 0xa855f7,
+      roughness: 0.16,
+      metalness: 0.68,
+      emissive: 0x7e22ce,
+      emissiveIntensity: 0.58
+    });
+    const blackQueenAccentMat = new THREE.MeshStandardMaterial({
+      color: 0xf43f5e,
+      roughness: 0.16,
+      metalness: 0.68,
+      emissive: 0xbe123c,
+      emissiveIntensity: 0.62
+    });
+    const whiteBishopAccentMat = new THREE.MeshStandardMaterial({
+      color: 0x0284c7,
+      roughness: 0.16,
+      metalness: 0.65,
+      emissive: 0x0369a1,
+      emissiveIntensity: 0.52
+    });
+    const blackBishopAccentMat = new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      roughness: 0.16,
+      metalness: 0.65,
+      emissive: 0x0284c7,
+      emissiveIntensity: 0.52
+    });
+    const ivoryTuskMat = new THREE.MeshStandardMaterial({
+      color: 0xfffbeb,
+      roughness: 0.18,
+      metalness: 0.12,
+      emissive: 0x78350f,
+      emissiveIntensity: 0.16
+    });
+
     const sideMats = {
-      w: { primary: whitePieceMat, trim: goldTrimMat, steel: forgedSteelMat, accent: whiteAccentMat },
-      b: { primary: blackPieceMat, trim: blackTrimMat, steel: blackSteelMat, accent: blackAccentMat }
+      w: {
+        primary: whitePieceMat,
+        trim: goldTrimMat,
+        steel: forgedSteelMat,
+        accent: whiteAccentMat,
+        steed: whiteSteedMat,
+        queenAccent: whiteQueenAccentMat,
+        bishopAccent: whiteBishopAccentMat,
+        ivoryTusk: ivoryTuskMat
+      },
+      b: {
+        primary: blackPieceMat,
+        trim: blackTrimMat,
+        steel: blackSteelMat,
+        accent: blackAccentMat,
+        steed: blackSteedMat,
+        queenAccent: blackQueenAccentMat,
+        bishopAccent: blackBishopAccentMat,
+        ivoryTusk: ivoryTuskMat
+      }
     };
 
     const PIECE_THEMES = {
@@ -1377,7 +1541,7 @@ export function initWizardChess() {
       const oldMixer = pieceObj.mixer;
       const newRoot = SkeletonUtils.clone(tpl.scene);
       newRoot.position.copy(oldRoot.position);
-      newRoot.scale.copy(oldRoot.scale);
+      applyPieceBaseScale(newRoot, pieceObj.type);
       newRoot.rotation.copy(oldRoot.rotation);
 
       let sharedPieceSkeleton = null;
@@ -1466,27 +1630,148 @@ export function initWizardChess() {
       return true;
     }
 
+    // Pre-allocated shared geometries for 3D Role Regalia (King Sovereign Spire & Double Ring, Queen Phoenix Diadem, Elephant Ivory Tusks)
+    const ROLE_REGALIA_SHARED_GEOS = (() => {
+      const mark = (g) => {
+        g.computeBoundingBox();
+        g.computeBoundingSphere();
+        g.userData = { isSharedPool: true };
+        return g;
+      };
+      const kingOuterRing = new THREE.RingGeometry(0.54, 0.63, 32);
+      kingOuterRing.rotateX(-Math.PI / 2);
+      kingOuterRing.translate(0, 0.018, 0);
+
+      const kingSpireShaft = new THREE.CylinderGeometry(0.024, 0.042, 0.36, 8);
+      const kingCrossBar = new THREE.BoxGeometry(0.24, 0.042, 0.042);
+      const kingSunHalo = new THREE.TorusGeometry(0.19, 0.022, 8, 24);
+      const kingCrownOrb = new THREE.OctahedronGeometry(0.082, 0);
+
+      const queenDiademRing = new THREE.TorusGeometry(0.20, 0.018, 8, 24);
+      queenDiademRing.rotateX(Math.PI / 2);
+      const queenWaistSash = new THREE.TorusGeometry(0.23, 0.024, 8, 24);
+      queenWaistSash.rotateX(Math.PI / 2);
+      const queenPhoenixPearl = new THREE.OctahedronGeometry(0.076, 1);
+
+      const bishopHaloRing = new THREE.TorusGeometry(0.16, 0.016, 8, 24);
+      const elephantTusk = new THREE.ConeGeometry(0.038, 0.34, 8);
+      const elephantHowdahGem = new THREE.OctahedronGeometry(0.095, 0);
+
+      return {
+        kingOuterRing: mark(kingOuterRing),
+        kingSpireShaft: mark(kingSpireShaft),
+        kingCrossBar: mark(kingCrossBar),
+        kingSunHalo: mark(kingSunHalo),
+        kingCrownOrb: mark(kingCrownOrb),
+        queenDiademRing: mark(queenDiademRing),
+        queenWaistSash: mark(queenWaistSash),
+        queenPhoenixPearl: mark(queenPhoenixPearl),
+        bishopHaloRing: mark(bishopHaloRing),
+        elephantTusk: mark(elephantTusk),
+        elephantHowdahGem: mark(elephantHowdahGem)
+      };
+    })();
+
+    function attachPieceRoleRegalia(pieceObj) {
+      if (!pieceObj || !pieceObj.mesh) return;
+      const root = pieceObj.mesh;
+      const bank = sideMats[pieceObj.color] || sideMats.w;
+      const existing = root.getObjectByName('PieceRoleRegaliaGroup');
+      if (existing && existing.parent) {
+        existing.parent.remove(existing);
+      }
+
+      const type = pieceObj.type;
+      if (type !== 'king' && type !== 'queen' && type !== 'bishop' && type !== 'elephant' && type !== 'advisor') {
+        return;
+      }
+
+      const grp = new THREE.Group();
+      grp.name = 'PieceRoleRegaliaGroup';
+      grp.userData = { isRoleRegalia: true, isSharedPool: true, piece: pieceObj };
+      const addPart = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) => {
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set(x, y, z);
+        if (rx || ry || rz) m.rotation.set(rx, ry, rz);
+        m.castShadow = false;
+        m.receiveShadow = false;
+        m.raycast = () => {};
+        m.userData = { isRoleRegaliaMesh: true, isSharedPool: true, piece: pieceObj };
+        m.updateMatrix();
+        m.matrixAutoUpdate = false;
+        grp.add(m);
+        return m;
+      };
+
+      if (type === 'king') {
+        // Sovereign Double Pedestal Ring + Towering Imperial Sun-Cross Spire (y = 1.60..1.96)
+        addPart(ROLE_REGALIA_SHARED_GEOS.kingOuterRing, bank.trim, 0, 0, 0);
+        addPart(ROLE_REGALIA_SHARED_GEOS.kingSpireShaft, bank.trim, 0, 1.72, 0);
+        addPart(ROLE_REGALIA_SHARED_GEOS.kingCrossBar, bank.trim, 0, 1.78, 0);
+        addPart(ROLE_REGALIA_SHARED_GEOS.kingSunHalo, bank.trim, 0, 1.72, 0);
+        addPart(ROLE_REGALIA_SHARED_GEOS.kingCrownOrb, bank.accent, 0, 1.92, 0);
+      } else if (type === 'queen') {
+        // Empress Phoenix Rose Diadem + Amethyst/Ruby Waist Sash & Floating Crown Pearl
+        addPart(ROLE_REGALIA_SHARED_GEOS.queenWaistSash, bank.queenAccent, 0, 0.72, 0);
+        addPart(ROLE_REGALIA_SHARED_GEOS.queenDiademRing, bank.queenAccent, 0, 1.54, 0, 0.18, 0, 0);
+        addPart(ROLE_REGALIA_SHARED_GEOS.queenPhoenixPearl, bank.queenAccent, 0, 1.70, 0);
+      } else if (type === 'elephant') {
+        // Xiangqi War-Elephant: Twin Curved Ivory Tusks projecting forward + Jade Howdah Crest
+        addPart(ROLE_REGALIA_SHARED_GEOS.elephantTusk, bank.ivoryTusk, -0.17, 0.68, 0.30, Math.PI * 0.34, 0, 0.22);
+        addPart(ROLE_REGALIA_SHARED_GEOS.elephantTusk, bank.ivoryTusk, 0.17, 0.68, 0.30, Math.PI * 0.34, 0, -0.22);
+        addPart(ROLE_REGALIA_SHARED_GEOS.bishopHaloRing, bank.bishopAccent, 0, 1.38, 0, Math.PI / 2, 0, 0);
+        addPart(ROLE_REGALIA_SHARED_GEOS.elephantHowdahGem, bank.bishopAccent, 0, 1.50, 0);
+      } else if (type === 'bishop') {
+        // Chess Bishop: Sapphire Arcane Halo & Mitre Crystal
+        addPart(ROLE_REGALIA_SHARED_GEOS.bishopHaloRing, bank.bishopAccent, 0, 1.48, 0, Math.PI * 0.35, 0, 0);
+        addPart(ROLE_REGALIA_SHARED_GEOS.queenPhoenixPearl, bank.bishopAccent, 0, 1.64, 0);
+      } else if (type === 'advisor') {
+        // Xiangqi Advisor: Slender Palace Guard Silver-Jade Collar Ring
+        addPart(ROLE_REGALIA_SHARED_GEOS.bishopHaloRing, bank.steel, 0, 1.06, 0, Math.PI / 2, 0, 0);
+      }
+
+      grp.updateMatrix();
+      grp.matrixAutoUpdate = false;
+      root.add(grp);
+    }
+
     function attachSkinKitbashToPiece(pieceObj) {
       if (!pieceObj || !pieceObj.mesh) return;
       const skinId = pieceObj.color === 'b' ? activeSkinBlack : activeSkinWhite;
-      const targetSetId = SCULPTED_SET_IDS.has(skinId) ? skinId : 'hogwarts';
+      const targetSetId = gameVariant === 'xiangqi' ? 'xiangqi' : (SCULPTED_SET_IDS.has(skinId) ? skinId : 'hogwarts');
 
-      if (targetSetId !== 'hogwarts' && !pieceTemplates[`${targetSetId}__${pieceObj.type}`]) {
-        ensureSkinSetLoaded(targetSetId);
-      } else if (
-        pieceObj.loadedSetId !== targetSetId &&
-        pieceTemplates[`${targetSetId}__${pieceObj.type}`] &&
-        (typeof isAnimatingMove === 'undefined' || !isAnimatingMove)
-      ) {
-        swapPieceTemplateMesh(pieceObj, targetSetId);
+      if (gameVariant === 'xiangqi') {
+        if (!pieceTemplates[`xiangqi__${pieceObj.type}`]) {
+          ensureXiangqiModelsLoaded();
+        } else if (
+          pieceObj.loadedSetId !== 'xiangqi' &&
+          (typeof isAnimatingMove === 'undefined' || !isAnimatingMove)
+        ) {
+          swapPieceTemplateMesh(pieceObj, 'xiangqi');
+        }
+      } else {
+        if (targetSetId !== 'hogwarts' && !pieceTemplates[`${targetSetId}__${pieceObj.type}`]) {
+          ensureSkinSetLoaded(targetSetId);
+        } else if (
+          pieceObj.loadedSetId !== targetSetId &&
+          pieceTemplates[`${targetSetId}__${pieceObj.type}`] &&
+          (typeof isAnimatingMove === 'undefined' || !isAnimatingMove)
+        ) {
+          swapPieceTemplateMesh(pieceObj, targetSetId);
+        }
       }
 
       const root = pieceObj.mesh;
       const bank = sideMats[pieceObj.color] || sideMats.w;
+      applyPieceBaseScale(root, pieceObj.type);
 
-      // Bind the 4 PBR material slots (Primary Body, Metallic Trim, Forged Steel, Emissive Gem/Visor Accent)
+      // Bind the PBR material slots + Role-Specific Steed / Queen / Bishop / Elephant / Advisor Accents
       root.traverse((child) => {
-        if (!child.isMesh || (child.userData && (child.userData.isHitboxProxy || child.userData.isPedestalRing))) {
+        if (
+          !child.isMesh ||
+          (child.userData &&
+            (child.userData.isHitboxProxy || child.userData.isPedestalRing || child.userData.isRoleRegaliaMesh))
+        ) {
           return;
         }
         const nm = child.name || '';
@@ -1499,16 +1784,43 @@ export function initWizardChess() {
         if (!child.userData.origMatName && mName) {
           child.userData.origMatName = mName;
         }
-        if (mName.includes('Glow')) {
-          child.material = bank.accent;
+        const isSteed = Boolean(
+          child.userData?.isSteedMesh || nm.endsWith('_Steed') || mName.includes('KnightSteedCoat')
+        );
+        if (isSteed) {
+          child.material = bank.steed;
+          child.castShadow = true;
+          child.receiveShadow = true;
+        } else if (mName.includes('Glow')) {
+          if (pieceObj.type === 'queen') {
+            child.material = bank.queenAccent;
+          } else if (pieceObj.type === 'bishop' || pieceObj.type === 'elephant') {
+            child.material = bank.bishopAccent;
+          } else if (pieceObj.type === 'advisor') {
+            child.material = bank.steel;
+          } else {
+            child.material = bank.accent;
+          }
           child.castShadow = false;
           child.receiveShadow = false;
         } else if (mName.includes('Gold') || mName.includes('Trim') || mName.includes('Bronze')) {
-          child.material = bank.trim;
+          if (pieceObj.type === 'advisor' && gameVariant === 'xiangqi') {
+            child.material = bank.steel;
+          } else if (pieceObj.type === 'elephant' && gameVariant === 'xiangqi') {
+            child.material = bank.bishopAccent;
+          } else {
+            child.material = bank.trim;
+          }
           child.castShadow = false;
           child.receiveShadow = false;
         } else if (mName.includes('Steel')) {
-          child.material = bank.steel;
+          if (pieceObj.type === 'queen') {
+            child.material = bank.queenAccent;
+          } else if (pieceObj.type === 'advisor' && gameVariant === 'xiangqi') {
+            child.material = bank.queenAccent;
+          } else {
+            child.material = bank.steel;
+          }
           child.castShadow = true;
           child.receiveShadow = false;
         } else {
@@ -1517,6 +1829,8 @@ export function initWizardChess() {
           child.receiveShadow = true;
         }
       });
+
+      attachPieceRoleRegalia(pieceObj);
 
       pieceObj.idleSettleRemaining = Math.max(pieceObj.idleSettleRemaining || 0, 0.12);
       if (pieceObj.mixer) {
@@ -1730,6 +2044,32 @@ export function initWizardChess() {
       }
     }
 
+    const XIANGQI_DEFAULT_FACTION_MATERIALS = {
+      redPrimary: { color: 0xc81e1e, roughness: 0.19, metalness: 0.28, emissive: 0x7f1d1d, emissiveIntensity: 0.30 },
+      redTrim: { color: 0xfbbf24, roughness: 0.16, metalness: 0.94, emissive: 0xd97706, emissiveIntensity: 0.40 },
+      redSteel: { color: 0xfde68a, roughness: 0.18, metalness: 0.90, emissive: 0xb45309, emissiveIntensity: 0.28 },
+      redAccent: { color: 0xff4d4f, roughness: 0.12, metalness: 0.55, emissive: 0xff3b30, emissiveIntensity: 0.92 },
+      redSteed: { color: 0xf8fafc, roughness: 0.18, metalness: 0.22, emissive: 0x334155, emissiveIntensity: 0.26 },
+      redQueenAccent: { color: 0xc026d3, roughness: 0.16, metalness: 0.68, emissive: 0x86198f, emissiveIntensity: 0.58 },
+      redBishopAccent: { color: 0x10b981, roughness: 0.16, metalness: 0.65, emissive: 0x059669, emissiveIntensity: 0.52 },
+      blackPrimary: { color: 0x111827, roughness: 0.17, metalness: 0.56, emissive: 0x0f172a, emissiveIntensity: 0.26 },
+      blackTrim: { color: 0xd97706, roughness: 0.18, metalness: 0.92, emissive: 0x92400e, emissiveIntensity: 0.34 },
+      blackSteel: { color: 0x94a3b8, roughness: 0.20, metalness: 0.88, emissive: 0x1e293b, emissiveIntensity: 0.24 },
+      blackAccent: { color: 0x38bdf8, roughness: 0.12, metalness: 0.55, emissive: 0x0284c7, emissiveIntensity: 0.88 },
+      blackSteed: { color: 0xd97706, roughness: 0.20, metalness: 0.52, emissive: 0x78350f, emissiveIntensity: 0.34 },
+      blackQueenAccent: { color: 0xf43f5e, roughness: 0.16, metalness: 0.68, emissive: 0xbe123c, emissiveIntensity: 0.62 },
+      blackBishopAccent: { color: 0x06b6d4, roughness: 0.16, metalness: 0.65, emissive: 0x0891b2, emissiveIntensity: 0.52 }
+    };
+
+    const CHESS_DEFAULT_ROLE_MATERIALS = {
+      whiteSteed: { color: 0x9a3412, roughness: 0.24, metalness: 0.24, emissive: 0x451a03, emissiveIntensity: 0.28 },
+      blackSteed: { color: 0xe2e8f0, roughness: 0.20, metalness: 0.38, emissive: 0x1e293b, emissiveIntensity: 0.28 },
+      whiteQueenAccent: { color: 0xa855f7, roughness: 0.16, metalness: 0.68, emissive: 0x7e22ce, emissiveIntensity: 0.58 },
+      blackQueenAccent: { color: 0xf43f5e, roughness: 0.16, metalness: 0.68, emissive: 0xbe123c, emissiveIntensity: 0.62 },
+      whiteBishopAccent: { color: 0x0284c7, roughness: 0.16, metalness: 0.65, emissive: 0x0369a1, emissiveIntensity: 0.52 },
+      blackBishopAccent: { color: 0x38bdf8, roughness: 0.16, metalness: 0.65, emissive: 0x0284c7, emissiveIntensity: 0.52 }
+    };
+
     function applyPieceTheme(themeId, sideOption = 'both') {
       const theme = PIECE_THEMES[themeId] || PIECE_THEMES.hogwarts;
       currentPieceThemeId = theme.id;
@@ -1742,6 +2082,9 @@ export function initWizardChess() {
         mat.needsUpdate = true;
       };
 
+      const useXiangqiCrimsonObsidian =
+        typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' && theme.id === 'hogwarts';
+
       const accentCfg = {
         color: theme.altarGlowColor || theme.trim.color,
         roughness: 0.12,
@@ -1752,26 +2095,65 @@ export function initWizardChess() {
 
       if (sideOption === 'both' || sideOption === 'w') {
         activeSkinWhite = theme.id;
-        applyMat(whitePieceMat, theme.white);
-        applyMat(goldTrimMat, theme.trim);
-        applyMat(forgedSteelMat, theme.steel);
-        applyMat(whiteAccentMat, accentCfg);
+        if (useXiangqiCrimsonObsidian) {
+          applyMat(whitePieceMat, XIANGQI_DEFAULT_FACTION_MATERIALS.redPrimary);
+          applyMat(goldTrimMat, XIANGQI_DEFAULT_FACTION_MATERIALS.redTrim);
+          applyMat(forgedSteelMat, XIANGQI_DEFAULT_FACTION_MATERIALS.redSteel);
+          applyMat(whiteAccentMat, XIANGQI_DEFAULT_FACTION_MATERIALS.redAccent);
+          applyMat(whiteSteedMat, XIANGQI_DEFAULT_FACTION_MATERIALS.redSteed);
+          applyMat(whiteQueenAccentMat, XIANGQI_DEFAULT_FACTION_MATERIALS.redQueenAccent);
+          applyMat(whiteBishopAccentMat, XIANGQI_DEFAULT_FACTION_MATERIALS.redBishopAccent);
+        } else {
+          applyMat(whitePieceMat, theme.white);
+          applyMat(goldTrimMat, theme.trim);
+          applyMat(forgedSteelMat, theme.steel);
+          applyMat(whiteAccentMat, accentCfg);
+          applyMat(whiteSteedMat, CHESS_DEFAULT_ROLE_MATERIALS.whiteSteed);
+          applyMat(whiteQueenAccentMat, CHESS_DEFAULT_ROLE_MATERIALS.whiteQueenAccent);
+          applyMat(whiteBishopAccentMat, CHESS_DEFAULT_ROLE_MATERIALS.whiteBishopAccent);
+        }
       }
       if (sideOption === 'both' || sideOption === 'b') {
         activeSkinBlack = theme.id;
-        applyMat(blackPieceMat, theme.black);
-        applyMat(blackTrimMat, theme.trim);
-        applyMat(blackSteelMat, theme.steel);
-        applyMat(blackAccentMat, accentCfg);
+        if (useXiangqiCrimsonObsidian) {
+          applyMat(blackPieceMat, XIANGQI_DEFAULT_FACTION_MATERIALS.blackPrimary);
+          applyMat(blackTrimMat, XIANGQI_DEFAULT_FACTION_MATERIALS.blackTrim);
+          applyMat(blackSteelMat, XIANGQI_DEFAULT_FACTION_MATERIALS.blackSteel);
+          applyMat(blackAccentMat, XIANGQI_DEFAULT_FACTION_MATERIALS.blackAccent);
+          applyMat(blackSteedMat, XIANGQI_DEFAULT_FACTION_MATERIALS.blackSteed);
+          applyMat(blackQueenAccentMat, XIANGQI_DEFAULT_FACTION_MATERIALS.blackQueenAccent);
+          applyMat(blackBishopAccentMat, XIANGQI_DEFAULT_FACTION_MATERIALS.blackBishopAccent);
+        } else {
+          applyMat(blackPieceMat, theme.black);
+          applyMat(blackTrimMat, theme.trim);
+          applyMat(blackSteelMat, theme.steel);
+          applyMat(blackAccentMat, accentCfg);
+          applyMat(blackSteedMat, CHESS_DEFAULT_ROLE_MATERIALS.blackSteed);
+          applyMat(blackQueenAccentMat, CHESS_DEFAULT_ROLE_MATERIALS.blackQueenAccent);
+          applyMat(blackBishopAccentMat, CHESS_DEFAULT_ROLE_MATERIALS.blackBishopAccent);
+        }
+      }
+
+      if (typeof sharedWhitePedestalRingMat !== 'undefined' && sharedWhitePedestalRingMat) {
+        sharedWhitePedestalRingMat.color.setHex(
+          typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' ? 0xff4d4f : 0xfff8e1
+        );
+      }
+      if (typeof sharedBlackPedestalRingMat !== 'undefined' && sharedBlackPedestalRingMat) {
+        sharedBlackPedestalRingMat.color.setHex(
+          typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' ? 0x38bdf8 : 0xd4af37
+        );
       }
 
       updateSanctumAltarTheme(theme);
 
       // Refresh 3D bone-socketed kitbash accessories on all active pieces on the board
       if (typeof boardState !== 'undefined' && Array.isArray(boardState)) {
-        for (let r = 0; r < 8; r++) {
-          for (let c = 0; c < 8; c++) {
-            const p = boardState[r]?.[c];
+        for (let r = 0; r < boardState.length; r++) {
+          const row = boardState[r];
+          if (!row) continue;
+          for (let c = 0; c < row.length; c++) {
+            const p = row[c];
             if (p) {
               attachSkinKitbashToPiece(p);
             }
@@ -1827,20 +2209,23 @@ export function initWizardChess() {
     const pieceHitboxGeos = {};
     const PIECE_HITBOX_HEIGHTS = {
       pawn: 0.25,
+      cannon: 0.26,
+      advisor: 0.27,
       rook: 0.28,
+      elephant: 0.29,
       knight: 0.29,
       bishop: 0.30,
       queen: 0.32,
       king: 0.34
     };
     function getPieceHitboxGeometry(type) {
-      const key = PIECE_HITBOX_HEIGHTS[type] ? type : 'default';
+      const key = `${gameVariant}__${PIECE_HITBOX_HEIGHTS[type] ? type : 'default'}`;
       if (!pieceHitboxGeos[key]) {
         const scale = getPieceWorldScale(type);
         const worldH = PIECE_HITBOX_HEIGHTS[type] || 0.26;
         const localH = worldH / scale;
-        const localTopR = 0.092 / scale;
-        const localBotR = 0.152 / scale;
+        const localTopR = (gameVariant === 'xiangqi' ? 0.082 : 0.092) / scale;
+        const localBotR = (gameVariant === 'xiangqi' ? 0.132 : 0.152) / scale;
         const geo = new THREE.CylinderGeometry(localTopR, localBotR, localH, 12);
         geo.translate(0, localH * 0.5, 0);
         geo.computeBoundingBox();
@@ -2600,6 +2985,205 @@ export function initWizardChess() {
       sanctumAltarGroup.add(motesPoints);
     }
 
+    const chessBoardDeckGroup = new THREE.Group();
+    const xiangqiBoardDeckGroup = new THREE.Group();
+    const xiangqiSquareMeshes = [];
+    function getActiveBoardSquareMeshes() {
+      return gameVariant === 'xiangqi' ? xiangqiSquareMeshes : boardSquareMeshes;
+    }
+
+    function buildXiangqiBoardGrid() {
+      const boardW = 8 * XIANGQI_SQ_SIZE; // 3.04m across 9 files (c=0..8)
+      const boardD = 9 * XIANGQI_SQ_SIZE; // 3.42m across 10 ranks (r=0..9)
+      const slabPad = 0.24;
+      const slabH = 0.036;
+
+      // 1. Imperial Obsidian-Jade Recessed Tablet Slab
+      const slabGeo = new THREE.BoxGeometry(boardW + slabPad * 2, slabH, boardD + slabPad * 2);
+      slabGeo.computeBoundingBox();
+      slabGeo.computeBoundingSphere();
+      const slabMesh = new THREE.Mesh(slabGeo, sanctumDarkSqMat);
+      slabMesh.position.set(0, BOARD_SURFACE_Y - slabH * 0.5, 0);
+      slabMesh.receiveShadow = true;
+      slabMesh.raycast = () => {};
+      slabMesh.updateMatrix();
+      slabMesh.matrixAutoUpdate = false;
+      xiangqiBoardDeckGroup.add(slabMesh);
+
+      // Outer Golden Imperial Frame around the 9x10 Tablet
+      const halfW = boardW * 0.5 + slabPad;
+      const halfD = boardD * 0.5 + slabPad;
+      const rimW = 0.052;
+      const rimH = 0.044;
+      const hRimGeo = new THREE.BoxGeometry(halfW * 2 + rimW * 2, rimH, rimW);
+      const vRimGeo = new THREE.BoxGeometry(rimW, rimH, halfD * 2);
+      for (const s of [-1, 1]) {
+        const hBar = new THREE.Mesh(hRimGeo, goldTrimMat);
+        hBar.position.set(0, BOARD_SURFACE_Y - rimH * 0.42, s * (halfD + rimW * 0.5));
+        hBar.receiveShadow = true;
+        hBar.raycast = () => {};
+        hBar.updateMatrix();
+        hBar.matrixAutoUpdate = false;
+        xiangqiBoardDeckGroup.add(hBar);
+
+        const vBar = new THREE.Mesh(vRimGeo, goldTrimMat);
+        vBar.position.set(s * (halfW + rimW * 0.5), BOARD_SURFACE_Y - rimH * 0.42, 0);
+        vBar.receiveShadow = true;
+        vBar.raycast = () => {};
+        vBar.updateMatrix();
+        vBar.matrixAutoUpdate = false;
+        xiangqiBoardDeckGroup.add(vBar);
+      }
+
+      // 2. Chu River — Han Border (楚河 — 漢界 / SỞ HÀ — HÁN GIỚI) between r=4 and r=5
+      const riverCanv = document.createElement('canvas');
+      riverCanv.width = 1024;
+      riverCanv.height = 192;
+      const rCtx = riverCanv.getContext('2d');
+      if (rCtx) {
+        const grad = rCtx.createLinearGradient(0, 0, 0, 192);
+        grad.addColorStop(0, 'rgba(8, 28, 36, 0.92)');
+        grad.addColorStop(0.5, 'rgba(12, 46, 56, 0.96)');
+        grad.addColorStop(1, 'rgba(8, 28, 36, 0.92)');
+        rCtx.fillStyle = grad;
+        rCtx.fillRect(0, 0, 1024, 192);
+
+        rCtx.strokeStyle = 'rgba(212, 175, 55, 0.45)';
+        rCtx.lineWidth = 3;
+        rCtx.strokeRect(6, 6, 1012, 180);
+
+        rCtx.fillStyle = 'rgba(245, 215, 110, 0.92)';
+        rCtx.font = 'bold 74px "Noto Serif SC", "PingFang SC", "Georgia", serif';
+        rCtx.textAlign = 'center';
+        rCtx.textBaseline = 'middle';
+        rCtx.fillText('楚   河', 256, 86);
+        rCtx.fillText('漢   界', 768, 86);
+
+        rCtx.fillStyle = 'rgba(212, 175, 55, 0.72)';
+        rCtx.font = '600 20px "Cinzel", "Georgia", serif';
+        rCtx.fillText('✦   SỞ HÀ  —  HÁN GIỚI   ✦', 512, 152);
+      }
+      const riverTex = new THREE.CanvasTexture(riverCanv);
+      riverTex.needsUpdate = true;
+      const riverMat = new THREE.MeshBasicMaterial({
+        map: riverTex,
+        transparent: true,
+        opacity: 0.94,
+        depthWrite: false
+      });
+      const riverGeo = new THREE.PlaneGeometry(boardW - 0.012, XIANGQI_SQ_SIZE - 0.012);
+      riverGeo.rotateX(-Math.PI / 2);
+      const riverMesh = new THREE.Mesh(riverGeo, riverMat);
+      riverMesh.position.set(0, BOARD_SURFACE_Y + 0.0018, 0);
+      riverMesh.raycast = () => {};
+      riverMesh.updateMatrix();
+      riverMesh.matrixAutoUpdate = false;
+      xiangqiBoardDeckGroup.add(riverMesh);
+
+      // 3. 10 Horizontal Rank Lines (r=0..9) & 9 Vertical File Lines (c=0..8)
+      const lineThick = 0.011;
+      const lineH = 0.005;
+      const rankLineGeo = new THREE.BoxGeometry(boardW + lineThick, lineH, lineThick);
+      for (let r = 0; r < 10; r++) {
+        const z = (r - 4.5) * XIANGQI_SQ_SIZE;
+        const rLine = new THREE.Mesh(rankLineGeo, goldTrimMat);
+        rLine.position.set(0, BOARD_SURFACE_Y + 0.0028, z);
+        rLine.raycast = () => {};
+        rLine.updateMatrix();
+        rLine.matrixAutoUpdate = false;
+        xiangqiBoardDeckGroup.add(rLine);
+      }
+
+      const fullFileGeo = new THREE.BoxGeometry(lineThick, lineH, boardD + lineThick);
+      const halfFileGeo = new THREE.BoxGeometry(lineThick, lineH, 4 * XIANGQI_SQ_SIZE + lineThick);
+      for (let c = 0; c < 9; c++) {
+        const x = (c - 4.0) * XIANGQI_SQ_SIZE;
+        if (c === 0 || c === 8) {
+          const fLine = new THREE.Mesh(fullFileGeo, goldTrimMat);
+          fLine.position.set(x, BOARD_SURFACE_Y + 0.0028, 0);
+          fLine.raycast = () => {};
+          fLine.updateMatrix();
+          fLine.matrixAutoUpdate = false;
+          xiangqiBoardDeckGroup.add(fLine);
+        } else {
+          for (const bankSign of [-1, 1]) {
+            const hLine = new THREE.Mesh(halfFileGeo, goldTrimMat);
+            hLine.position.set(x, BOARD_SURFACE_Y + 0.0028, bankSign * 2.5 * XIANGQI_SQ_SIZE);
+            hLine.raycast = () => {};
+            hLine.updateMatrix();
+            hLine.matrixAutoUpdate = false;
+            xiangqiBoardDeckGroup.add(hLine);
+          }
+        }
+      }
+
+      // 4. Two 3x3 Nine Palaces (Cửu Cung: c=3..5, r=0..2 & r=7..9) X-Diagonals
+      const diagLen = 2 * Math.SQRT2 * XIANGQI_SQ_SIZE;
+      const diagGeo = new THREE.BoxGeometry(lineThick * 0.9, lineH, diagLen);
+      for (const palaceZ of [-3.5 * XIANGQI_SQ_SIZE, 3.5 * XIANGQI_SQ_SIZE]) {
+        for (const rotSign of [-1, 1]) {
+          const dMesh = new THREE.Mesh(diagGeo, goldTrimMat);
+          dMesh.position.set(0, BOARD_SURFACE_Y + 0.003, palaceZ);
+          dMesh.rotation.y = rotSign * (Math.PI / 4);
+          dMesh.raycast = () => {};
+          dMesh.updateMatrix();
+          dMesh.matrixAutoUpdate = false;
+          xiangqiBoardDeckGroup.add(dMesh);
+        }
+      }
+
+      // 5. 14 Fiducial Star/Cross Medallions at Cannon (r=2,7; c=1,7) & Soldier (r=3,6; c=0,2,4,6,8) Intersections
+      const fiducialCoords = [
+        [2, 1], [2, 7], [7, 1], [7, 7],
+        [3, 0], [3, 2], [3, 4], [3, 6], [3, 8],
+        [6, 0], [6, 2], [6, 4], [6, 6], [6, 8]
+      ];
+      const fidGeo = new THREE.RingGeometry(0.032, 0.050, 8);
+      fidGeo.rotateX(-Math.PI / 2);
+      for (const [fr, fc] of fiducialCoords) {
+        const fx = (fc - 4.0) * XIANGQI_SQ_SIZE;
+        const fz = (fr - 4.5) * XIANGQI_SQ_SIZE;
+        const fMesh = new THREE.Mesh(fidGeo, goldTrimMat);
+        fMesh.position.set(fx, BOARD_SURFACE_Y + 0.0034, fz);
+        fMesh.raycast = () => {};
+        fMesh.updateMatrix();
+        fMesh.matrixAutoUpdate = false;
+        xiangqiBoardDeckGroup.add(fMesh);
+      }
+
+      // 6. 90 Intersection Hitboxes (xiangqiSquareMeshes) & Carved Brass Intersection Studs
+      const hitPadGeo = new THREE.CylinderGeometry(XIANGQI_SQ_SIZE * 0.44, XIANGQI_SQ_SIZE * 0.44, 0.016, 16);
+      hitPadGeo.computeBoundingBox();
+      hitPadGeo.computeBoundingSphere();
+      const hitPadMat = new THREE.MeshBasicMaterial({ visible: false });
+      const nodeStudGeo = new THREE.CylinderGeometry(0.022, 0.026, 0.006, 8);
+
+      for (let r = 0; r < 10; r++) {
+        for (let c = 0; c < 9; c++) {
+          const ix = (c - 4.0) * XIANGQI_SQ_SIZE;
+          const iz = (r - 4.5) * XIANGQI_SQ_SIZE;
+
+          const padMesh = new THREE.Mesh(hitPadGeo, hitPadMat);
+          padMesh.position.set(ix, BOARD_SURFACE_Y - 0.004, iz);
+          padMesh.userData = { r, c, isSquare: true };
+          padMesh.updateMatrix();
+          padMesh.matrixAutoUpdate = false;
+          xiangqiBoardDeckGroup.add(padMesh);
+          xiangqiSquareMeshes.push(padMesh);
+
+          const studMesh = new THREE.Mesh(nodeStudGeo, goldTrimMat);
+          studMesh.position.set(ix, BOARD_SURFACE_Y + 0.0025, iz);
+          studMesh.raycast = () => {};
+          studMesh.updateMatrix();
+          studMesh.matrixAutoUpdate = false;
+          xiangqiBoardDeckGroup.add(studMesh);
+        }
+      }
+
+      xiangqiBoardDeckGroup.visible = gameVariant === 'xiangqi';
+      boardGroup.add(xiangqiBoardDeckGroup);
+    }
+
     function buildChessBoardGrid() {
       buildSanctumArenaAltar();
 
@@ -2622,13 +3206,13 @@ export function initWizardChess() {
         for (let c = 0; c < 8; c++) {
           const isLight = (r + c) % 2 === 0;
           const sqMesh = new THREE.Mesh(sqGeo, isLight ? sanctumLightSqMat : sanctumDarkSqMat);
-          const pos = boardToWorld(r, c);
+          const pos = new THREE.Vector3((c - 3.5) * BOARD_SQ_SIZE, BOARD_SURFACE_Y, (r - 3.5) * BOARD_SQ_SIZE);
           sqMesh.position.set(pos.x, BOARD_SURFACE_Y - tileH * 0.5, pos.z);
           sqMesh.receiveShadow = true;
           sqMesh.userData = { r, c, isSquare: true };
           sqMesh.updateMatrix();
           sqMesh.matrixAutoUpdate = false;
-          boardGroup.add(sqMesh);
+          chessBoardDeckGroup.add(sqMesh);
           boardSquareMeshes.push(sqMesh);
         }
       }
@@ -2646,7 +3230,7 @@ export function initWizardChess() {
         hBar.raycast = () => {};
         hBar.updateMatrix();
         hBar.matrixAutoUpdate = false;
-        boardGroup.add(hBar);
+        chessBoardDeckGroup.add(hBar);
 
         const vBar = new THREE.Mesh(vertGeo, goldTrimMat);
         vBar.position.set(s * (halfB + rimW * 0.5), BOARD_SURFACE_Y - rimH * 0.42, 0);
@@ -2654,8 +3238,12 @@ export function initWizardChess() {
         vBar.raycast = () => {};
         vBar.updateMatrix();
         vBar.matrixAutoUpdate = false;
-        boardGroup.add(vBar);
+        chessBoardDeckGroup.add(vBar);
       }
+
+      chessBoardDeckGroup.visible = gameVariant === 'chess';
+      boardGroup.add(chessBoardDeckGroup);
+      buildXiangqiBoardGrid();
 
       boardGroup.updateMatrix();
       boardGroup.updateMatrixWorld(true);
@@ -3024,6 +3612,10 @@ export function initWizardChess() {
         if (rem.parent) rem.parent.remove(rem);
       }
 
+      // Split Knight's Warhorse triangles (Horse_*, BackLeg*, FrontLeg*, FrontHoof*) into a sibling SkinnedMesh
+      // so the Rider & Base keep bank.primary while the Warhorse receives a contrasting bank.steed coat!
+      splitKnightSteedSubMesh(gltf.scene);
+
       // Pre-populate local boundingBox & boundingSphere on all template SkinnedMeshes so
       // Three.js Frustum.intersectsObject never triggers 1.15M-vertex CPU applyBoneTransform stalls.
       gltf.scene.traverse((child) => {
@@ -3052,6 +3644,104 @@ export function initWizardChess() {
         scene: gltf.scene,
         animations: gltf.animations || []
       };
+    }
+
+    function splitKnightSteedSubMesh(sceneRoot) {
+      if (!sceneRoot) return;
+      const bones = [];
+      sceneRoot.traverse((c) => {
+        if (c.isBone) bones.push(c.name || '');
+      });
+      const hasHorseBones = bones.some((b) => /Horse_Head|Horse_Chest|Horse_Rear/i.test(b));
+      if (!hasHorseBones) return;
+
+      const meshesToSplit = [];
+      sceneRoot.traverse((child) => {
+        if (!child.isMesh || !child.geometry || child.userData?.isSteedMesh) return;
+        const mName = child.material?.name || '';
+        if (/Gold|Trim|Bronze|Glow|Steel/i.test(mName)) return;
+        if (child.geometry.attributes?.skinIndex && child.geometry.attributes?.skinWeight) {
+          meshesToSplit.push(child);
+        }
+      });
+
+      for (const child of meshesToSplit) {
+        const skelBones = child.skeleton?.bones || [];
+        const horseBoneIdx = new Set();
+        skelBones.forEach((b, idx) => {
+          if (/Horse_|BackLeg|FrontLeg|FrontHoof/i.test(b.name || '')) {
+            horseBoneIdx.add(idx);
+          }
+        });
+        if (horseBoneIdx.size === 0) {
+          bones.forEach((bName, idx) => {
+            if (/Horse_|BackLeg|FrontLeg|FrontHoof/i.test(bName)) {
+              horseBoneIdx.add(idx);
+            }
+          });
+        }
+        if (horseBoneIdx.size === 0) continue;
+
+        const geo = child.geometry;
+        const si = geo.attributes.skinIndex;
+        const sw = geo.attributes.skinWeight;
+        const idxAttr = geo.index;
+        const isHorseVert = (v) => {
+          let bestB = si.getX(v);
+          let bestW = sw.getX(v);
+          if (sw.getY(v) > bestW) {
+            bestB = si.getY(v);
+            bestW = sw.getY(v);
+          }
+          if (sw.getZ(v) > bestW) {
+            bestB = si.getZ(v);
+            bestW = sw.getZ(v);
+          }
+          if (sw.getW(v) > bestW) {
+            bestB = si.getW(v);
+            bestW = sw.getW(v);
+          }
+          return horseBoneIdx.has(bestB);
+        };
+
+        const riderIndices = [];
+        const steedIndices = [];
+        const triCount = idxAttr ? Math.floor(idxAttr.count / 3) : Math.floor(si.count / 3);
+        for (let t = 0; t < triCount; t++) {
+          const a = idxAttr ? idxAttr.getX(t * 3) : t * 3;
+          const b = idxAttr ? idxAttr.getX(t * 3 + 1) : t * 3 + 1;
+          const d = idxAttr ? idxAttr.getX(t * 3 + 2) : t * 3 + 2;
+          const hCount = (isHorseVert(a) ? 1 : 0) + (isHorseVert(b) ? 1 : 0) + (isHorseVert(d) ? 1 : 0);
+          if (hCount >= 2) {
+            steedIndices.push(a, b, d);
+          } else {
+            riderIndices.push(a, b, d);
+          }
+        }
+
+        if (steedIndices.length > 0 && riderIndices.length > 0 && child.parent) {
+          const steedGeo = geo.clone();
+          steedGeo.setIndex(steedIndices);
+          geo.setIndex(riderIndices);
+
+          const steedMesh = child.isSkinnedMesh
+            ? new THREE.SkinnedMesh(steedGeo, child.material)
+            : new THREE.Mesh(steedGeo, child.material);
+          steedMesh.name = `${child.name || 'Knight'}_Steed`;
+          steedMesh.castShadow = true;
+          steedMesh.receiveShadow = true;
+          steedMesh.raycast = () => {};
+          steedMesh.userData = {
+            ...(child.userData || {}),
+            origMatName: 'KnightSteedCoat',
+            isSteedMesh: true
+          };
+          if (child.isSkinnedMesh && child.skeleton) {
+            steedMesh.bind(child.skeleton, child.bindMatrix);
+          }
+          child.parent.add(steedMesh);
+        }
+      }
     }
 
     function evictUnusedMobileSkinSets(protectedSetId) {
@@ -3090,6 +3780,41 @@ export function initWizardChess() {
       }
     }
 
+    let xiangqiModelsLoadPromise = null;
+    function ensureXiangqiModelsLoaded() {
+      if (xiangqiModelsLoadPromise) return xiangqiModelsLoadPromise;
+      xiangqiModelsLoadPromise = (async () => {
+        try {
+          await Promise.all(
+            XIANGQI_PIECE_TYPES.map(async (type) => {
+              if (pieceTemplates[`xiangqi__${type}`]) return;
+              const gltf = await loadGltfModel(`xiangqi/${type}_white`);
+              pieceTemplates[`xiangqi__${type}`] = preparePieceTemplateFromGltf(gltf);
+            })
+          );
+          if (gameVariant === 'xiangqi' && typeof boardState !== 'undefined' && Array.isArray(boardState)) {
+            for (let r = 0; r < boardState.length; r++) {
+              const row = boardState[r];
+              if (!row) continue;
+              for (let c = 0; c < row.length; c++) {
+                const p = row[c];
+                if (p) {
+                  attachSkinKitbashToPiece(p);
+                }
+              }
+            }
+            if (typeof renderer !== 'undefined' && renderer.shadowMap) {
+              renderer.shadowMap.needsUpdate = true;
+            }
+          }
+        } catch (err) {
+          console.warn('Xiangqi sculpted models load warning:', err);
+          xiangqiModelsLoadPromise = null;
+        }
+      })();
+      return xiangqiModelsLoadPromise;
+    }
+
     function ensureSkinSetLoaded(setId) {
       if (!SCULPTED_SET_IDS.has(setId)) return Promise.resolve();
       if (skinSetLoadPromises[setId]) return skinSetLoadPromises[setId];
@@ -3110,9 +3835,11 @@ export function initWizardChess() {
             evictUnusedMobileSkinSets(setId);
           }
           if (typeof boardState !== 'undefined' && Array.isArray(boardState)) {
-            for (let r = 0; r < 8; r++) {
-              for (let c = 0; c < 8; c++) {
-                const p = boardState[r]?.[c];
+            for (let r = 0; r < boardState.length; r++) {
+              const row = boardState[r];
+              if (!row) continue;
+              for (let c = 0; c < row.length; c++) {
+                const p = row[c];
                 if (p) {
                   attachSkinKitbashToPiece(p);
                 }
@@ -3344,7 +4071,7 @@ export function initWizardChess() {
         }
       })();
 
-      // 2. Load 6 Sculpted & Rigged Chess Piece Models concurrently (shared between White & Black with PBR materials)
+      // 2. Load 6 Sculpted & Rigged Chess Piece Models + 7 Sculpted Xiangqi Piece Models concurrently
       const pieceTasks = PIECE_TYPES.map(async (type) => {
         try {
           const gltf = await loadGltfModel(`${type}_white`);
@@ -3359,13 +4086,16 @@ export function initWizardChess() {
         }
       });
 
+      const xiangqiTask = ensureXiangqiModelsLoaded();
+
       await Promise.all([cathedralTask, ...pieceTasks]);
+      await xiangqiTask;
     }
 
     // =========================================================================
-    // Chess Game State, Complete Move Rules, and AI Engine
+    // Chess & Xiangqi Game State, Complete Move Rules, and AI Engine
     // =========================================================================
-    let boardState = Array.from({ length: 8 }, () => Array(8).fill(null));
+    let boardState = Array.from({ length: 10 }, () => Array(9).fill(null));
     let currentTurn = 'w';
     let selectedSquare = null;
     let validMoves = [];
@@ -3495,9 +4225,33 @@ export function initWizardChess() {
       }
     }
 
+    function setOverheadCameraForSide(color, immediate = false) {
+      // High Top-Down Overhead Seat: commanding bird's-eye view of the entire board by default
+      const zSign = color === 'b' ? -1 : 1;
+      const tPortrait = syncResponsiveCameraFov();
+      const desiredPos = new THREE.Vector3(
+        0,
+        Number((7.35 + tPortrait * 1.45).toFixed(3)),
+        Number((zSign * (3.95 + tPortrait * 0.45)).toFixed(3))
+      );
+      const desiredTarget = new THREE.Vector3(
+        0,
+        0.78,
+        Number((zSign * (-tPortrait * 0.28)).toFixed(3))
+      );
+      if (immediate) {
+        activeCamTransition = null;
+        camera.position.copy(desiredPos);
+        orbitControls.target.copy(desiredTarget);
+        flushOrbitControlsDamping();
+      } else {
+        smoothCameraTo(desiredPos, desiredTarget, 0.75);
+      }
+    }
+
     function instantiatePiece(type, color, r, c) {
       const skinId = color === 'b' ? activeSkinBlack : activeSkinWhite;
-      const targetSetId = SCULPTED_SET_IDS.has(skinId) ? skinId : 'hogwarts';
+      const targetSetId = gameVariant === 'xiangqi' ? 'xiangqi' : (SCULPTED_SET_IDS.has(skinId) ? skinId : 'hogwarts');
       const customTpl = pieceTemplates[`${targetSetId}__${type}`];
       const tpl = customTpl || pieceTemplates[`hogwarts__${type}`] || pieceTemplates[`${type}_${color}`];
       const loadedSetId = customTpl ? targetSetId : 'hogwarts';
@@ -3581,8 +4335,7 @@ export function initWizardChess() {
 
       const worldPos = boardToWorld(r, c);
       root.position.copy(worldPos);
-      const scale = getPieceWorldScale(type);
-      root.scale.set(scale, scale, scale);
+      applyPieceBaseScale(root, type);
       // White (at +Z, r=6,7) faces -Z (Math.PI); Black (at -Z, r=0,1) faces +Z (0)
       root.rotation.y = color === 'w' ? Math.PI : 0;
       scene.add(root);
@@ -3648,15 +4401,18 @@ export function initWizardChess() {
 
     // Piece-Specific Locomotion Gait Physics (smooth stride cadence, hover lift, pitch lean, and roll sway)
     const LOCOMOTION_GAIT_PROFILES = {
-      pawn:   { moveTimeScale: 0.96, stepFreqPerSq: 2.0, stepLift: 0.018, hoverLift: 0.000, pitchLean: 0.075, rollSway: 0.032 },
-      rook:   { moveTimeScale: 0.84, stepFreqPerSq: 1.5, stepLift: 0.008, hoverLift: 0.000, pitchLean: 0.055, rollSway: 0.018 },
-      knight: { moveTimeScale: 1.04, stepFreqPerSq: 1.0, stepLift: 0.000, hoverLift: 0.075, pitchLean: 0.180, rollSway: 0.025 },
-      bishop: { moveTimeScale: 0.90, stepFreqPerSq: 1.0, stepLift: 0.006, hoverLift: 0.064, pitchLean: 0.068, rollSway: 0.028 },
-      queen:  { moveTimeScale: 0.94, stepFreqPerSq: 1.2, stepLift: 0.008, hoverLift: 0.042, pitchLean: 0.062, rollSway: 0.045 },
-      king:   { moveTimeScale: 0.82, stepFreqPerSq: 1.6, stepLift: 0.014, hoverLift: 0.000, pitchLean: 0.048, rollSway: 0.036 }
+      pawn:     { moveTimeScale: 0.96, stepFreqPerSq: 2.0, stepLift: 0.018, hoverLift: 0.000, pitchLean: 0.075, rollSway: 0.032 },
+      advisor:  { moveTimeScale: 0.94, stepFreqPerSq: 1.6, stepLift: 0.014, hoverLift: 0.010, pitchLean: 0.068, rollSway: 0.030 },
+      elephant: { moveTimeScale: 0.80, stepFreqPerSq: 1.2, stepLift: 0.022, hoverLift: 0.000, pitchLean: 0.060, rollSway: 0.038 },
+      cannon:   { moveTimeScale: 0.88, stepFreqPerSq: 1.4, stepLift: 0.006, hoverLift: 0.000, pitchLean: 0.045, rollSway: 0.015 },
+      rook:     { moveTimeScale: 0.84, stepFreqPerSq: 1.5, stepLift: 0.008, hoverLift: 0.000, pitchLean: 0.055, rollSway: 0.018 },
+      knight:   { moveTimeScale: 1.04, stepFreqPerSq: 1.0, stepLift: 0.000, hoverLift: 0.075, pitchLean: 0.180, rollSway: 0.025 },
+      bishop:   { moveTimeScale: 0.90, stepFreqPerSq: 1.0, stepLift: 0.006, hoverLift: 0.064, pitchLean: 0.068, rollSway: 0.028 },
+      queen:    { moveTimeScale: 0.94, stepFreqPerSq: 1.2, stepLift: 0.008, hoverLift: 0.042, pitchLean: 0.062, rollSway: 0.045 },
+      king:     { moveTimeScale: 0.82, stepFreqPerSq: 1.6, stepLift: 0.014, hoverLift: 0.000, pitchLean: 0.048, rollSway: 0.036 }
     };
 
-    // 6 Unique Character Signature Attack Profiles (distinct standoff distance, multi-hit combo timing, aerial/ranged choreography & VFX)
+    // Character Signature Attack Profiles (Chess + Xiangqi War-Gods)
     const ATTACK_SYNC_PROFILES = {
       pawn: {
         signatureId: 'pawn_phalanx_spear',
@@ -3669,6 +4425,42 @@ export function initWizardChess() {
         blowClip: 0.78,
         maxLunge: 0.145,
         hitStopDuration: 0
+      },
+      advisor: {
+        signatureId: 'advisor_imperial_twin_blades',
+        signatureName: 'Imperial Palace Guard Twin-Jian Cross Slash',
+        standoff: 0.34,
+        timeScale: 1.12,
+        swingStartClip: 0.20,
+        contactClip: 0.38,
+        secondContactClip: 0.58,
+        blowClip: 0.76,
+        maxLunge: 0.135,
+        hitStopDuration: 0
+      },
+      elephant: {
+        signatureId: 'elephant_war_tusk_quake',
+        signatureName: 'Armored War Elephant Tusk Gore & Seismic Stomp',
+        standoff: 0.40,
+        timeScale: 0.98,
+        swingStartClip: 0.30,
+        contactClip: 0.52,
+        secondContactClip: 0,
+        blowClip: 0.76,
+        maxLunge: 0.120,
+        hitStopDuration: 0.048
+      },
+      cannon: {
+        signatureId: 'cannon_dragon_mortar_barrage',
+        signatureName: 'Dragon-Mouth Siege Cannon Mortar Arc Barrage',
+        standoff: 0.72, // Ranged Siege Artillery!
+        timeScale: 1.04,
+        swingStartClip: 0.20,
+        contactClip: 0.46,
+        secondContactClip: 0,
+        blowClip: 0.78,
+        maxLunge: 0.020,
+        hitStopDuration: 0.045
       },
       rook: {
         signatureId: 'rook_titan_earthshaker',
@@ -3791,12 +4583,14 @@ export function initWizardChess() {
     }
 
     function clearAllPieces() {
-      for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
-          if (boardState[r][c]) {
-            removePieceFromScene(boardState[r][c]);
+      for (let r = 0; r < boardState.length; r++) {
+        const row = boardState[r];
+        if (!row) continue;
+        for (let c = 0; c < row.length; c++) {
+          if (row[c]) {
+            removePieceFromScene(row[c]);
           }
-          boardState[r][c] = null;
+          row[c] = null;
         }
       }
       activeMixers.length = 0;
@@ -3860,13 +4654,13 @@ export function initWizardChess() {
     function updatePieceLabelUI() {
       const modeNames = {
         smart: 'Thông Minh',
-        all: 'Tất Cả (32 Quân)',
+        all: 'Tất Cả (32)',
         tap: 'Khi Chạm'
       };
       const shortNames = {
-        smart: 'Cờ Lớn',
+        smart: 'Bật',
         all: 'Tất Cả',
-        tap: 'Khi Chạm'
+        tap: 'Chạm'
       };
       const btnLabels = document.getElementById('btn-piece-labels');
       if (btnLabels) {
@@ -3875,7 +4669,7 @@ export function initWizardChess() {
       }
       const btnQuickLabels = document.getElementById('btn-quick-labels');
       if (btnQuickLabels) {
-        btnQuickLabels.textContent = `🏷️ Tên: ${shortNames[pieceLabelMode] || 'Cờ Lớn'}`;
+        btnQuickLabels.textContent = `🏷️ Tên: ${shortNames[pieceLabelMode] || 'Bật'}`;
         btnQuickLabels.classList.toggle('active', pieceLabelMode !== 'tap');
       }
     }
@@ -3915,8 +4709,8 @@ export function initWizardChess() {
       const vh = window.innerHeight || 800;
       let slotIdx = 0;
 
-      for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
+      for (let r = 0; r < getBoardRows(); r++) {
+        for (let c = 0; c < getBoardCols(); c++) {
           const p = boardState[r]?.[c];
           if (!p || !p.mesh) continue;
           const isSelected = Boolean(selectedSquare && selectedSquare.r === r && selectedSquare.c === c);
@@ -3936,12 +4730,12 @@ export function initWizardChess() {
           } else if (pieceLabelMode === 'all') {
             shouldShow = true;
           } else if (pieceLabelMode === 'smart') {
-            shouldShow = p.type !== 'pawn';
+            shouldShow = gameVariant === 'xiangqi' ? true : p.type !== 'pawn';
           }
 
           if (!shouldShow || slotIdx >= 32) continue;
 
-          const meta = PIECE_ROLE_METADATA[p.type] || PIECE_ROLE_METADATA.pawn;
+          const meta = getRoleMetadata(p.type);
           const roleScale = ROLE_SCALE_MULTIPLIERS[p.type] || 1.0;
           const worldHeadY =
             p.mesh.position.y + (PIECE_HEIGHTS[p.type] || 0.38) * roleScale + (p.type === 'pawn' ? 0.065 : 0.095);
@@ -3960,9 +4754,13 @@ export function initWizardChess() {
             : p.color === 'w'
               ? meta.glyphW
               : meta.glyphB;
+          const pieceShortVi =
+            p.color === 'w'
+              ? meta.shortViW || meta.shortVi
+              : meta.shortViB || meta.shortVi;
           const nameStr = isCaptureTarget
-            ? `${p.color === 'w' ? meta.glyphW : meta.glyphB} ${meta.shortVi}`
-            : meta.shortVi;
+            ? `${p.color === 'w' ? meta.glyphW : meta.glyphB} ${pieceShortVi}`
+            : pieceShortVi;
           const cls = `piece-overhead-badge faction-${p.color}${
             p.type === 'pawn' && !isSelected && !isInspected && !isCaptureTarget ? ' is-pawn-compact' : ''
           }${isCaptureTarget ? ' is-capture-target' : isSelected ? ' is-selected' : isInspected ? ' is-inspected' : ''}`;
@@ -3979,7 +4777,17 @@ export function initWizardChess() {
             slot.el.className = cls;
             slot.lastClass = cls;
           }
-          slot.el.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -100%)`;
+          let staggerY = 0;
+          if (gameVariant === 'xiangqi' && !isSelected && !isInspected && !isCaptureTarget) {
+            if (p.type === 'king') staggerY = -12;
+            else if (p.type === 'advisor') staggerY = 6;
+            else if (p.type === 'elephant') staggerY = -11;
+            else if (p.type === 'knight') staggerY = 5;
+            else if (p.type === 'rook') staggerY = -9;
+            else if (p.type === 'cannon') staggerY = 6;
+            else if (p.type === 'pawn') staggerY = -6;
+          }
+          slot.el.style.transform = `translate3d(${sx.toFixed(1)}px, ${(sy + staggerY).toFixed(1)}px, 0) translate(-50%, -100%)`;
           if (!slot.visible) {
             slot.el.style.opacity = '1';
             slot.visible = true;
@@ -4002,14 +4810,30 @@ export function initWizardChess() {
         const inspectedPiece =
           activeSq && !isAnimatingMove && !gameOver ? boardState[activeSq.r]?.[activeSq.c] : null;
         if (inspectedPiece && inspectedPiece.mesh) {
-          const meta = PIECE_ROLE_METADATA[inspectedPiece.type] || PIECE_ROLE_METADATA.pawn;
+          const meta = getRoleMetadata(inspectedPiece.type);
           const isFriendly = inspectedPiece.color === currentTurn;
           const glyph = inspectedPiece.color === 'w' ? meta.glyphW : meta.glyphB;
-          const colorVi = inspectedPiece.color === 'w' ? 'TRẮNG' : 'ĐEN';
+          const pieceTitleVi =
+            inspectedPiece.color === 'w'
+              ? meta.viNameW || meta.viName
+              : meta.viNameB || meta.viName;
+          const colorVi =
+            gameVariant === 'xiangqi'
+              ? inspectedPiece.color === 'w'
+                ? 'PHE ĐỎ (HỒNG)'
+                : 'PHE ĐEN (HẮC)'
+              : inspectedPiece.color === 'w'
+                ? 'TRẮNG'
+                : 'ĐEN';
           const tagText = isFriendly ? 'Quân Ta' : 'Quân Địch';
           const files = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-          const sqCoord = `${files[activeSq.c] || 'A'}${8 - activeSq.r}`;
-          const nextHtml = `<div class="piece-inspect-header"><span class="piece-inspect-glyph">${glyph}</span><span>${meta.viName.toUpperCase()} ${colorVi} (${meta.enName}) • ${sqCoord}</span><span class="piece-inspect-tag">${tagText}</span></div><div class="piece-inspect-sub">${meta.moveHint}</div>`;
+          const sqCoord =
+            gameVariant === 'xiangqi'
+              ? inspectedPiece.color === 'w'
+                ? `Lộ ${9 - activeSq.c} (Đỏ) • Tuyến ${10 - activeSq.r}`
+                : `Lộ ${activeSq.c + 1} (Đen) • Tuyến ${activeSq.r + 1}`
+              : `${files[activeSq.c] || 'A'}${8 - activeSq.r}`;
+          const nextHtml = `<div class="piece-inspect-header"><span class="piece-inspect-glyph">${glyph}</span><span>${pieceTitleVi.toUpperCase()} • ${colorVi} (${meta.enName}) • ${sqCoord}</span><span class="piece-inspect-tag">${tagText}</span></div><div class="piece-inspect-sub">${meta.moveHint}</div>`;
           if (inspectCard.dataset.lastHtml !== nextHtml) {
             inspectCard.innerHTML = nextHtml;
             inspectCard.dataset.lastHtml = nextHtml;
@@ -4068,6 +4892,7 @@ export function initWizardChess() {
 
     function captureBoardSnapshot() {
       return {
+        gameVariant,
         currentTurn,
         gameOver,
         capturedByWhite,
@@ -4114,6 +4939,11 @@ export function initWizardChess() {
       inspectedSquare = null;
       validMoves = [];
       isAnimatingMove = false;
+      if (snap.gameVariant === 'xiangqi' || snap.gameVariant === 'chess') {
+        gameVariant = snap.gameVariant;
+        chessBoardDeckGroup.visible = gameVariant === 'chess';
+        xiangqiBoardDeckGroup.visible = gameVariant === 'xiangqi';
+      }
       currentTurn = snap.currentTurn;
       gameOver = snap.gameOver;
       capturedByWhite = snap.capturedByWhite;
@@ -4133,10 +4963,13 @@ export function initWizardChess() {
         scriptDeviated = snap.scriptDeviated;
       }
 
-      for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
-          const cell = snap.cells[r][c];
-          if (cell) {
+      boardState = Array.from({ length: getBoardRows() }, () => Array(getBoardCols()).fill(null));
+      for (let r = 0; r < snap.cells.length; r++) {
+        const row = snap.cells[r];
+        if (!row) continue;
+        for (let c = 0; c < row.length; c++) {
+          const cell = row[c];
+          if (cell && r < boardState.length && c < boardState[r].length) {
             const inst = instantiatePiece(cell.type, cell.color, r, c);
             inst.hasMoved = Boolean(cell.hasMoved);
             boardState[r][c] = inst;
@@ -4232,21 +5065,43 @@ export function initWizardChess() {
         scriptCursor = 0;
       }
 
-      const backRow = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'];
-      for (let c = 0; c < 8; c++) {
-        boardState[7][c] = instantiatePiece(backRow[c], 'w', 7, c);
-        boardState[6][c] = instantiatePiece('pawn', 'w', 6, c);
-        boardState[1][c] = instantiatePiece('pawn', 'b', 1, c);
-        boardState[0][c] = instantiatePiece(backRow[c], 'b', 0, c);
-      }
+      chessBoardDeckGroup.visible = gameVariant === 'chess';
+      xiangqiBoardDeckGroup.visible = gameVariant === 'xiangqi';
+      boardState = Array.from({ length: getBoardRows() }, () => Array(getBoardCols()).fill(null));
 
-      positionHistory = [computePositionHash(extractPureBoard(boardState), currentTurn, enPassantTarget)];
+      if (gameVariant === 'xiangqi') {
+        const initX = createInitialXiangqiBoard();
+        for (let r = 0; r < 10; r++) {
+          for (let c = 0; c < 9; c++) {
+            const cell = initX[r][c];
+            if (cell) {
+              boardState[r][c] = instantiatePiece(cell.type, cell.color, r, c);
+            }
+          }
+        }
+        positionHistory = [computeXiangqiPositionHash(extractPureXiangqiBoard(boardState), currentTurn)];
+      } else {
+        const backRow = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'];
+        for (let c = 0; c < 8; c++) {
+          boardState[7][c] = instantiatePiece(backRow[c], 'w', 7, c);
+          boardState[6][c] = instantiatePiece('pawn', 'w', 6, c);
+          boardState[1][c] = instantiatePiece('pawn', 'b', 1, c);
+          boardState[0][c] = instantiatePiece(backRow[c], 'b', 0, c);
+        }
+        positionHistory = [computePositionHash(extractPureBoard(boardState), currentTurn, enPassantTarget)];
+      }
 
       if (orientCamera) {
         const viewSide = playerColor === 'b' ? 'b' : 'w';
         playerCamSide = viewSide;
-        setActiveCamButton('btn-cam-player');
-        setCameraForSide(viewSide, false);
+        overheadCamSide = viewSide;
+        if (document.getElementById('btn-cam-player')?.classList.contains('active')) {
+          setActiveCamButton('btn-cam-player');
+          setCameraForSide(viewSide, false);
+        } else {
+          setActiveCamButton('btn-cam-top');
+          setOverheadCameraForSide(viewSide, false);
+        }
       }
 
       renderer.shadowMap.needsUpdate = true;
@@ -4256,9 +5111,12 @@ export function initWizardChess() {
     }
 
     // =========================================================================
-    // Legal Chess Move Generation (Including Check Filtering, Castling & En Passant)
+    // Legal Chess & Xiangqi Move Generation
     // =========================================================================
     function getPseudoMovesForPiece(r, c, board = boardState) {
+      if (gameVariant === 'xiangqi') {
+        return getXiangqiLegalMovesForPiece(extractPureXiangqiBoard(board), r, c);
+      }
       const piece = board[r][c];
       if (!piece) return [];
       const moves = [];
@@ -4338,6 +5196,9 @@ export function initWizardChess() {
     }
 
     function isKingInCheck(color, board = boardState) {
+      if (gameVariant === 'xiangqi') {
+        return isXiangqiGeneralInCheck(extractPureXiangqiBoard(board), color);
+      }
       let kingR = -1;
       let kingC = -1;
       for (let r = 0; r < 8; r++) {
@@ -4367,10 +5228,16 @@ export function initWizardChess() {
     }
 
     function getLegalMovesForPiece(r, c) {
+      if (gameVariant === 'xiangqi') {
+        return getXiangqiLegalMovesForPiece(extractPureXiangqiBoard(boardState), r, c);
+      }
       return getPureLegalMovesForPiece(extractPureBoard(boardState), r, c, enPassantTarget);
     }
 
     function getAllLegalMoves(color) {
+      if (gameVariant === 'xiangqi') {
+        return getAllXiangqiLegalMoves(extractPureXiangqiBoard(boardState), color);
+      }
       return getAllPureLegalMoves(extractPureBoard(boardState), color, enPassantTarget);
     }
 
@@ -4495,6 +5362,25 @@ export function initWizardChess() {
       side: THREE.DoubleSide
     }));
 
+    const sharedBlockedPointRingGeo = markSharedPoolAsset((() => {
+      const g = new THREE.RingGeometry(XIANGQI_SQ_SIZE * 0.22, XIANGQI_SQ_SIZE * 0.34, 6);
+      g.rotateX(-Math.PI / 2);
+      return g;
+    })());
+    const sharedBlockedPointRingMat = markSharedPoolAsset(new THREE.MeshBasicMaterial({
+      color: 0xff5a1f,
+      transparent: true,
+      opacity: 0.84,
+      side: THREE.DoubleSide
+    }));
+    const sharedCannonScreenRingMat = markSharedPoolAsset(new THREE.MeshBasicMaterial({
+      color: 0xfbbf24,
+      transparent: true,
+      opacity: 0.82,
+      side: THREE.DoubleSide
+    }));
+    let activeCannonScreenWorldPos = null;
+
     function clearGroupWithPoolSafety(group) {
       while (group.children.length > 0) {
         const ch = group.children[0];
@@ -4533,11 +5419,11 @@ export function initWizardChess() {
         }
       }
 
-      // 2. King in Check Pulsing Crimson Warning Halo
+      // 2. King / General in Check Pulsing Crimson Warning Halo
       if (!gameOver && isKingInCheck(currentTurn, boardState)) {
-        for (let r = 0; r < 8; r++) {
-          for (let c = 0; c < 8; c++) {
-            const p = boardState[r][c];
+        for (let r = 0; r < getBoardRows(); r++) {
+          for (let c = 0; c < getBoardCols(); c++) {
+            const p = boardState[r]?.[c];
             if (p && p.color === currentTurn && p.type === 'king') {
               const kPos = boardToWorld(r, c);
               sharedCheckRingMat.opacity = 0.88;
@@ -4586,6 +5472,7 @@ export function initWizardChess() {
       const dotGeo = isTouchOrCompact ? sharedMoveDotGeoMobile : sharedMoveDotGeoDesktop;
       const dotMat = isTouchOrCompact ? sharedMoveDotMatMobile : sharedMoveDotMatDesktop;
 
+      const shownScreens = new Set();
       for (const m of moves) {
         const pos = boardToWorld(m.r, m.c);
         if (m.capture) {
@@ -4593,11 +5480,34 @@ export function initWizardChess() {
           capMesh.raycast = () => {};
           capMesh.position.set(pos.x, BOARD_SURFACE_Y + 0.012, pos.z);
           squareHighlightsGroup.add(capMesh);
+          if (typeof m.screenR === 'number' && typeof m.screenC === 'number') {
+            const scKey = `${m.screenR},${m.screenC}`;
+            if (!shownScreens.has(scKey)) {
+              shownScreens.add(scKey);
+              const scPos = boardToWorld(m.screenR, m.screenC);
+              const scRing = new THREE.Mesh(sharedBlockedPointRingGeo, sharedCannonScreenRingMat);
+              scRing.raycast = () => {};
+              scRing.position.set(scPos.x, BOARD_SURFACE_Y + 0.013, scPos.z);
+              squareHighlightsGroup.add(scRing);
+            }
+          }
         } else {
           const dotMesh = new THREE.Mesh(dotGeo, dotMat);
           dotMesh.raycast = () => {};
           dotMesh.position.set(pos.x, BOARD_SURFACE_Y + 0.01, pos.z);
           squareHighlightsGroup.add(dotMesh);
+        }
+      }
+
+      // In Xiangqi mode, highlight blocked Horse legs (Cản Mã) & blocked Elephant eyes (Chặn Mắt Tượng)
+      if (gameVariant === 'xiangqi') {
+        const blockedPts = getXiangqiBlockedPointsForPiece(extractPureXiangqiBoard(boardState), r, c);
+        for (const bp of blockedPts) {
+          const bPos = boardToWorld(bp.r, bp.c);
+          const bMesh = new THREE.Mesh(sharedBlockedPointRingGeo, sharedBlockedPointRingMat);
+          bMesh.raycast = () => {};
+          bMesh.position.set(bPos.x, BOARD_SURFACE_Y + 0.014, bPos.z);
+          squareHighlightsGroup.add(bMesh);
         }
       }
     }
@@ -4953,6 +5863,196 @@ export function initWizardChess() {
         return;
       }
 
+      if (pieceType === 'cannon') {
+        // XIANGQI CANNON (Pháo Thần Công): Parabolic Mortar Arc over Screen Piece + Artillery Fire Pillar
+        if (stage === 'windup') {
+          const muzzlePt = new THREE.Vector3(
+            attackerPos.x + dirX * 0.14,
+            BOARD_SURFACE_Y + 0.24,
+            attackerPos.z + dirZ * 0.14
+          );
+          addCombatVfxMesh(
+            vfxVertRingGeo,
+            primaryVfxHex,
+            0.95,
+            muzzlePt,
+            { x: 0.35, y: heading, z: 0 },
+            0.38,
+            (vfx, u) => {
+              vfx.mesh.scale.setScalar(0.45 + u * 1.9);
+              vfx.mat.opacity = vfx.baseOpacity * (1 - u);
+            }
+          );
+          // Golden launch-pad rune circle beneath the Screen Piece (Ngòi Pháo)
+          const screenPt = activeCannonScreenWorldPos
+            ? new THREE.Vector3(activeCannonScreenWorldPos.x, BOARD_SURFACE_Y + 0.018, activeCannonScreenWorldPos.z)
+            : new THREE.Vector3((attackerPos.x + targetPos.x) * 0.5, BOARD_SURFACE_Y + 0.018, (attackerPos.z + targetPos.z) * 0.5);
+          addCombatVfxMesh(
+            vfxHexRuneGeo,
+            0xff9100,
+            0.94,
+            screenPt,
+            { x: 0, y: 0, z: 0 },
+            0.66,
+            (vfx, u) => {
+              vfx.mesh.rotation.y = u * Math.PI * 3.2;
+              vfx.mesh.scale.setScalar(0.85 + Math.sin(u * Math.PI) * 0.65);
+              vfx.mat.opacity = vfx.baseOpacity * (1 - u * 0.85);
+            }
+          );
+          // Parabolic Mortar Shell Arc soaring high (H_arc = 0.85m) from Cannon to Target
+          const shellStart = muzzlePt.clone();
+          const shellEnd = new THREE.Vector3(targetPos.x, BOARD_SURFACE_Y + 0.18, targetPos.z);
+          addCombatVfxMesh(
+            vfxNovaSphereGeo,
+            primaryVfxHex,
+            0.98,
+            shellStart,
+            { x: 0, y: 0, z: 0 },
+            0.52,
+            (vfx, u) => {
+              const arcY = 4 * 0.85 * u * (1 - u);
+              vfx.mesh.position.set(
+                shellStart.x + (shellEnd.x - shellStart.x) * u,
+                shellStart.y + (shellEnd.y - shellStart.y) * u + arcY,
+                shellStart.z + (shellEnd.z - shellStart.z) * u
+              );
+              vfx.mesh.scale.setScalar(0.32 + Math.sin(u * Math.PI) * 0.16);
+              vfx.mat.opacity = vfx.baseOpacity * (1 - Math.max(0, (u - 0.85) / 0.15));
+            }
+          );
+        } else if (stage === 'contact1' || stage === 'finisher') {
+          const groundPt = new THREE.Vector3(targetPos.x, BOARD_SURFACE_Y + 0.016, targetPos.z);
+          addCombatVfxMesh(
+            vfxFlatRingGeo,
+            primaryVfxHex,
+            0.96,
+            groundPt,
+            { x: 0, y: 0, z: 0 },
+            0.54,
+            (vfx, u) => {
+              vfx.mesh.scale.setScalar(0.55 + u * 2.85);
+              vfx.mat.opacity = vfx.baseOpacity * (1 - u);
+            }
+          );
+          if (stage === 'finisher') {
+            const pillarPt = new THREE.Vector3(targetPos.x, BOARD_SURFACE_Y, targetPos.z);
+            addCombatVfxMesh(
+              vfxPillarGeo,
+              accentVfxHex,
+              0.94,
+              pillarPt,
+              { x: 0, y: 0, z: 0 },
+              0.52,
+              (vfx, u) => {
+                const wScale = u < 0.25 ? 0.6 + (u / 0.25) * 0.95 : Math.max(0.08, 1.55 * (1 - (u - 0.25) / 0.75));
+                vfx.mesh.scale.set(wScale, 1.1, wScale);
+                vfx.mat.opacity = vfx.baseOpacity * (1 - u);
+              }
+            );
+            const domePt = new THREE.Vector3(targetPos.x, BOARD_SURFACE_Y + 0.22, targetPos.z);
+            addCombatVfxMesh(
+              vfxNovaSphereGeo,
+              primaryVfxHex,
+              0.92,
+              domePt,
+              { x: 0, y: 0, z: 0 },
+              0.48,
+              (vfx, u) => {
+                vfx.mesh.scale.setScalar(0.55 + u * 2.35);
+                vfx.mat.opacity = vfx.baseOpacity * (1 - u);
+              }
+            );
+          }
+        }
+        return;
+      }
+
+      if (pieceType === 'elephant') {
+        // XIANGQI ELEPHANT (Tượng Chiến): Twin-Tusk Seismic Stomp & Stone Spikes
+        if (stage === 'contact1' || stage === 'finisher') {
+          const groundPt = new THREE.Vector3(targetPos.x, BOARD_SURFACE_Y + 0.015, targetPos.z);
+          addCombatVfxMesh(
+            vfxFlatRingGeo,
+            primaryVfxHex,
+            0.94,
+            groundPt,
+            { x: 0, y: 0, z: 0 },
+            0.54,
+            (vfx, u) => {
+              vfx.mesh.scale.setScalar(0.55 + u * 2.5);
+              vfx.mat.opacity = vfx.baseOpacity * (1 - u);
+            }
+          );
+          if (stage === 'finisher') {
+            for (let i = 0; i < 6; i++) {
+              const ang = (i / 6) * Math.PI * 2;
+              const rad = 0.16 + (i % 2) * 0.06;
+              const spkPos = new THREE.Vector3(
+                targetPos.x + Math.cos(ang) * rad,
+                BOARD_SURFACE_Y,
+                targetPos.z + Math.sin(ang) * rad
+              );
+              addCombatVfxMesh(
+                vfxSpikeConeGeo,
+                i % 2 === 0 ? primaryVfxHex : accentVfxHex,
+                0.90,
+                spkPos,
+                { x: (Math.random() - 0.5) * 0.24, y: ang, z: (Math.random() - 0.5) * 0.24 },
+                0.54,
+                (vfx, u) => {
+                  const pop = u < 0.28 ? u / 0.28 : 1.0 - (u - 0.28) / 0.72;
+                  vfx.mesh.scale.set(0.82, Math.max(0.05, pop * 1.35), 0.82);
+                  vfx.mat.opacity = vfx.baseOpacity * Math.max(0, 1 - u * 1.05);
+                }
+              );
+            }
+          }
+        }
+        return;
+      }
+
+      if (pieceType === 'advisor') {
+        // XIANGQI ADVISOR (Sĩ Cận Vệ): Twin-Crescent Imperial Guard Slash & Lotus Halo
+        if (stage === 'contact1' || stage === 'contact2') {
+          const tiltSign = stage === 'contact1' ? 1 : -1;
+          const arcPt = new THREE.Vector3(
+            (attackerPos.x + targetPos.x) * 0.5,
+            BOARD_SURFACE_Y + 0.24,
+            (attackerPos.z + targetPos.z) * 0.5
+          );
+          addCombatVfxMesh(
+            vfxBladeArcGeo,
+            stage === 'contact1' ? primaryVfxHex : accentVfxHex,
+            0.94,
+            arcPt,
+            { x: Math.PI / 2 + tiltSign * 0.48, y: heading, z: 0 },
+            0.34,
+            (vfx, u) => {
+              vfx.mesh.rotation.z = u * Math.PI * 2.6 * tiltSign;
+              vfx.mesh.scale.setScalar(0.80 + u * 0.90);
+              vfx.mat.opacity = vfx.baseOpacity * (1 - u);
+            }
+          );
+        } else if (stage === 'finisher') {
+          const haloPt = new THREE.Vector3(targetPos.x, BOARD_SURFACE_Y + 0.016, targetPos.z);
+          addCombatVfxMesh(
+            vfxHexRuneGeo,
+            primaryVfxHex,
+            0.92,
+            haloPt,
+            { x: 0, y: 0, z: 0 },
+            0.50,
+            (vfx, u) => {
+              vfx.mesh.rotation.y = u * Math.PI * 2.2;
+              vfx.mesh.scale.setScalar(0.55 + u * 2.2);
+              vfx.mat.opacity = vfx.baseOpacity * (1 - u);
+            }
+          );
+        }
+        return;
+      }
+
       // Default / King: Sovereign Execution — Heaven-Cleaver Greatsword, Sky Lightning Smite & Ground Fissure
       if (stage === 'contact1' || stage === 'finisher') {
         const fissurePt = new THREE.Vector3(
@@ -5009,7 +6109,10 @@ export function initWizardChess() {
       const skinId = color === 'b' ? activeSkinBlack : activeSkinWhite;
       const theme = PIECE_THEMES[skinId] || PIECE_THEMES.hogwarts;
       const bank = sideMats[color] || sideMats.w;
-      const shardCount = attackerType === 'rook' || attackerType === 'king' ? 24 : 20;
+      const shardCount =
+        attackerType === 'rook' || attackerType === 'king' || attackerType === 'cannon' || attackerType === 'elephant'
+          ? 24
+          : 20;
       for (let i = 0; i < shardCount; i++) {
         const sz = 0.026 + Math.random() * 0.054;
         const fragMat = i % 3 === 0 ? bank.trim : bank.primary;
@@ -5033,13 +6136,16 @@ export function initWizardChess() {
           // Piercing forward spear cone blast
           vx = dirX * (1.4 + Math.random() * 1.6) + (Math.random() - 0.5) * 1.2;
           vz = dirZ * (1.4 + Math.random() * 1.6) + (Math.random() - 0.5) * 1.2;
-        } else if (attackerType === 'rook') {
+        } else if (attackerType === 'rook' || attackerType === 'elephant') {
           // High volcanic earthshaker eruption
           vy = 1.85 + Math.random() * 2.45;
+        } else if (attackerType === 'cannon') {
+          // High-explosive bronze artillery mortar blast
+          vy = 2.10 + Math.random() * 2.55;
         } else if (attackerType === 'bishop') {
           // Levitating arcane implosion-then-burst
           vy = 1.55 + Math.random() * 1.95;
-        } else if (attackerType === 'queen') {
+        } else if (attackerType === 'queen' || attackerType === 'advisor') {
           // Spiraling whirlwind tangential burst
           const ang = (i / shardCount) * Math.PI * 2;
           vx = Math.cos(ang) * 2.15;
@@ -5060,7 +6166,8 @@ export function initWizardChess() {
       }
       impactFlashLight.color.setHex(theme.shatterColor || 0xffb74d);
       impactFlashLight.position.set(worldPos.x, worldPos.y + 0.4, worldPos.z);
-      impactFlashLight.intensity = attackerType === 'king' || attackerType === 'bishop' ? 10.5 : 8.2;
+      impactFlashLight.intensity =
+        attackerType === 'king' || attackerType === 'bishop' || attackerType === 'cannon' ? 10.5 : 8.2;
     }
 
     // =========================================================================
@@ -5090,15 +6197,31 @@ export function initWizardChess() {
         preMoveHighlightTask = null;
       }
 
-      const isEnPassant = Boolean(
-        matchedLegal?.enPassant ||
-          (piece.type === 'pawn' && fromC !== toC && !targetOnDest && boardState[fromR]?.[toC]?.color && boardState[fromR]?.[toC]?.color !== piece.color)
-      );
+      const isEnPassant =
+        gameVariant !== 'xiangqi' &&
+        Boolean(
+          matchedLegal?.enPassant ||
+            (piece.type === 'pawn' &&
+              fromC !== toC &&
+              !targetOnDest &&
+              boardState[fromR]?.[toC]?.color &&
+              boardState[fromR]?.[toC]?.color !== piece.color)
+        );
       const epCapR = isEnPassant ? (matchedLegal?.captureR ?? fromR) : toR;
       const epCapC = isEnPassant ? (matchedLegal?.captureC ?? toC) : toC;
       const captured = isEnPassant ? boardState[epCapR]?.[epCapC] : targetOnDest;
       const isCapture = Boolean(captured);
       const chosenPromotion = options.promotion || matchedLegal?.promotion || 'queen';
+
+      if (gameVariant === 'xiangqi' && piece.type === 'cannon' && isCapture && matchedLegal?.screenR !== undefined) {
+        activeCannonScreenWorldPos = boardToWorld(matchedLegal.screenR, matchedLegal.screenC);
+      } else {
+        activeCannonScreenWorldPos = null;
+      }
+      const horseLegWorldPos =
+        gameVariant === 'xiangqi' && piece.type === 'knight' && matchedLegal?.legR !== undefined
+          ? boardToWorld(matchedLegal.legR, matchedLegal.legC)
+          : null;
 
       // Save board state snapshot (including pre-move scriptCursor & scriptDeviated) so Undo / Left Arrow can step backward
       moveHistory.push({
@@ -5182,7 +6305,11 @@ export function initWizardChess() {
       playPieceClip(piece, 'Move', true, 0.14);
 
       // Detect Castling (King moves 2 files horizontally: e1->g1/c1 or e8->g8/c8) and animate the Rook simultaneously
-      const isCastling = piece.type === 'king' && fromR === toR && Math.abs(toC - fromC) === 2;
+      const isCastling =
+        gameVariant !== 'xiangqi' &&
+        piece.type === 'king' &&
+        fromR === toR &&
+        Math.abs(toC - fromC) === 2;
       const castleRookFromC = isCastling ? (toC > fromC ? 7 : 0) : -1;
       const castleRookToC = isCastling ? (toC > fromC ? 5 : 3) : -1;
       const castleRook = isCastling ? boardState[fromR][castleRookFromC] : null;
@@ -5217,9 +6344,11 @@ export function initWizardChess() {
 
       // Collect all bystander pieces (both friendly and enemy) on the board for concrete collision avoidance
       const bystanders = [];
-      for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
-          const other = boardState[r][c];
+      const rows = getBoardRows();
+      const cols = getBoardCols();
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const other = boardState[r]?.[c];
           if (other && other !== piece && other !== captured && other.mesh) {
             bystanders.push({
               piece: other,
@@ -5241,7 +6370,7 @@ export function initWizardChess() {
 
       let knightLateralSign = 0;
       let knightVaultPeak = 0;
-      if (piece.type === 'knight') {
+      if (piece.type === 'knight' && !horseLegWorldPos) {
         let blockedPosSide = false;
         let blockedNegSide = false;
         let maxBlockerHeight = 0;
@@ -5294,7 +6423,13 @@ export function initWizardChess() {
         const hoverOffset = gaitProfile.hoverLift * archSin;
 
         if (piece.type === 'knight') {
-          if (knightLateralSign !== 0) {
+          if (horseLegWorldPos) {
+            // Xiangqi Horse (Mã): authentic 2-stage curve through the unblocked orthogonal Horse's Leg intersection before banking diagonally
+            const inv = 1 - ease;
+            bx = inv * inv * fromVec.x + 2 * inv * ease * horseLegWorldPos.x + ease * ease * toVec.x;
+            bz = inv * inv * fromVec.z + 2 * inv * ease * horseLegWorldPos.z + ease * ease * toVec.z;
+            by = BOARD_SURFACE_Y + archSin * 0.095;
+          } else if (knightLateralSign !== 0) {
             // Curve horizontally through the open L-corridor
             bx += segPerpX * knightLateralSign * 0.165 * archSin;
             bz += segPerpZ * knightLateralSign * 0.165 * archSin;
@@ -5305,6 +6440,9 @@ export function initWizardChess() {
           } else {
             by = BOARD_SURFACE_Y + archSin * 0.085;
           }
+        } else if (piece.type === 'cannon' && isCapture && activeCannonScreenWorldPos) {
+          // Xiangqi Cannon vaults cleanly over the screen piece when gliding into firing stance
+          by = BOARD_SURFACE_Y + Math.pow(archSin, 0.65) * 0.42;
         } else {
           by = BOARD_SURFACE_Y + hoverOffset + stepBounce;
         }
@@ -5579,6 +6717,7 @@ export function initWizardChess() {
       function finishMove() {
         resetBystandersToHome();
         activeCombatMixers.clear();
+        activeCannonScreenWorldPos = null;
         boardState[fromR][fromC] = null;
         if (isEnPassant) {
           if (captured) {
@@ -5600,13 +6739,13 @@ export function initWizardChess() {
           if (castleRook.mesh) {
             castleRook.mesh.position.copy(castleRookEndPos);
             castleRook.mesh.rotation.set(0, castleRook.color === 'w' ? Math.PI : 0, 0);
-            castleRook.mesh.scale.setScalar(getPieceWorldScale('rook'));
+            applyPieceBaseScale(castleRook.mesh, 'rook');
           }
           playPieceClip(castleRook, 'Idle', true, 0.24);
         }
 
-        // Pawn Promotion to chosen piece (Queen, Rook, Bishop, or Knight)
-        if (piece.type === 'pawn' && (toR === 0 || toR === 7)) {
+        // Pawn Promotion to chosen piece (Queen, Rook, Bishop, or Knight) — Chess only
+        if (gameVariant !== 'xiangqi' && piece.type === 'pawn' && (toR === 0 || toR === 7)) {
           removePieceFromScene(piece);
           const promoted = instantiatePiece(chosenPromotion, piece.color, toR, toC);
           promoted.hasMoved = true;
@@ -5615,12 +6754,12 @@ export function initWizardChess() {
         } else {
           piece.mesh.position.copy(endPos);
           piece.mesh.rotation.set(0, piece.color === 'w' ? Math.PI : 0, 0);
-          piece.mesh.scale.setScalar(basePieceScale);
+          applyPieceBaseScale(piece.mesh, piece.type);
           playPieceClip(piece, 'Idle', true, 0.24);
         }
 
         // Update En Passant target square
-        if (piece.type === 'pawn' && Math.abs(toR - fromR) === 2) {
+        if (gameVariant !== 'xiangqi' && piece.type === 'pawn' && Math.abs(toR - fromR) === 2) {
           enPassantTarget = {
             r: (fromR + toR) / 2,
             c: fromC,
@@ -5662,7 +6801,11 @@ export function initWizardChess() {
             setCameraForSide(currentTurn, false);
           }
         }
-        positionHistory.push(computePositionHash(extractPureBoard(boardState), currentTurn, enPassantTarget));
+        positionHistory.push(
+          gameVariant === 'xiangqi'
+            ? computeXiangqiPositionHash(extractPureXiangqiBoard(boardState), currentTurn)
+            : computePositionHash(extractPureBoard(boardState), currentTurn, enPassantTarget)
+        );
         isAnimatingMove = false;
         updateTurnUI();
         maybeScheduleAIMove();
@@ -5757,10 +6900,17 @@ export function initWizardChess() {
 
             const atkClipTime = (elapsed - tApproach) * atkProfile.timeScale;
 
-            // Trigger early windup signature VFX & audio for Ranged Caster (Bishop), Sky-Lancer (Knight), and Sovereign (King)
+            // Trigger early windup signature VFX & audio for Ranged Caster (Bishop), Cannon, Elephant, Sky-Lancer (Knight), and Sovereign (King)
             if (!windupVfxTriggered && atkClipTime >= SWING_START_CLIP_TIME * 0.65) {
               windupVfxTriggered = true;
-              if (piece.type === 'bishop' || piece.type === 'knight' || piece.type === 'king') {
+              if (
+                piece.type === 'bishop' ||
+                piece.type === 'knight' ||
+                piece.type === 'king' ||
+                piece.type === 'cannon' ||
+                piece.type === 'elephant' ||
+                piece.type === 'advisor'
+              ) {
                 wizardAudio.playSignatureAttack(piece.type, 'windup');
                 spawnSignatureCombatVFX(piece.type, 'windup', piece.mesh.position, endPos, dirX, dirZ, piece.color);
               }
@@ -5803,8 +6953,8 @@ export function initWizardChess() {
                   defShoveDist = 0.075 + p * 0.045;
                   defPitchX = -0.18 - p * 0.12;
                 }
-              } else if (piece.type === 'rook') {
-                // 2. ROOK: Colossal Titan Earthshaker Leap & Vertical Crush Slam
+              } else if (piece.type === 'rook' || piece.type === 'elephant') {
+                // 2. ROOK / XIANGQI ELEPHANT: Colossal Titan Earthshaker Leap & Vertical Crush Slam
                 if (atkClipTime < CONTACT_CLIP_TIME) {
                   const p = Math.min(1, atkClipTime / CONTACT_CLIP_TIME);
                   attackerLiftY = Math.sin(p * Math.PI) * 0.165;
@@ -5818,6 +6968,22 @@ export function initWizardChess() {
                   defScaleY = 1.0 - easeInOutCubic(p) * 0.42;
                   defScaleXZ = 1.0 + easeInOutCubic(p) * 0.20;
                   defShoveDist = p * 0.035;
+                }
+              } else if (piece.type === 'cannon') {
+                // XIANGQI CANNON (Pháo): Barrel Elevate -> Muzzle Blast Recoil -> Mortar Detonation
+                if (atkClipTime < SWING_START_CLIP_TIME) {
+                  const p = Math.min(1, atkClipTime / SWING_START_CLIP_TIME);
+                  attackerPitchX = -0.32 * easeInOutCubic(p);
+                } else if (atkClipTime < CONTACT_CLIP_TIME) {
+                  const p = (atkClipTime - SWING_START_CLIP_TIME) / Math.max(0.05, CONTACT_CLIP_TIME - SWING_START_CLIP_TIME);
+                  attackerPitchX = -0.32 + Math.sin(p * Math.PI) * 0.18;
+                  lungeOffset = -Math.sin(p * Math.PI) * 0.085; // Heavy cannon carriage recoil!
+                } else {
+                  const cp = Math.min(1, (atkClipTime - CONTACT_CLIP_TIME) / Math.max(0.04, BLOW_CLIP_TIME - CONTACT_CLIP_TIME));
+                  attackerPitchX = -0.14 * (1 - cp);
+                  defLiftY = Math.sin(cp * Math.PI) * 0.14;
+                  defShoveDist = cp * 0.085;
+                  defPitchX = -cp * 0.28;
                 }
               } else if (piece.type === 'knight') {
                 // 3. KNIGHT: Sky-Lancer Pegasus Ballistic Vault & Diving Lance Impale
@@ -5850,8 +7016,8 @@ export function initWizardChess() {
                   defRollZ = Math.sin(levP * Math.PI * 6) * 0.18;
                   defPitchX = -0.16 * levP;
                 }
-              } else if (piece.type === 'queen') {
-                // 5. QUEEN: Empress Valkyrie 360-Degree Whirlwind Blitz & Dual Blade Slash Combo
+              } else if (piece.type === 'queen' || piece.type === 'advisor') {
+                // 5. QUEEN / XIANGQI ADVISOR: Whirlwind Blitz & Dual Blade Slash Combo
                 const spinStart = 0.14;
                 const spinSpan = Math.max(0.1, BLOW_CLIP_TIME - spinStart);
                 const spinP = Math.max(0, Math.min(1, (atkClipTime - spinStart) / spinSpan));
@@ -5901,11 +7067,7 @@ export function initWizardChess() {
                 endPos.z + dirZ * defShoveDist
               );
               captured.mesh.rotation.set(defPitchX, defYaw, defRollZ);
-              captured.mesh.scale.set(
-                defenderBaseScale * defScaleXZ,
-                defenderBaseScale * defScaleY,
-                defenderBaseScale * defScaleXZ
-              );
+              applyPieceBaseScale(captured.mesh, captured.type, defScaleXZ, defScaleY);
 
               const curSep = piece.mesh.position.distanceTo(captured.mesh.position);
               if (curSep < (cameraTelemetry.minCombatSeparation ?? Infinity)) {
@@ -5932,7 +7094,7 @@ export function initWizardChess() {
                   BOARD_SURFACE_Y + 0.28,
                   endPos.z - dirZ * 0.08
                 );
-                impactFlashLight.intensity = piece.type === 'king' || piece.type === 'rook' ? 7.2 : 4.8;
+                impactFlashLight.intensity = piece.type === 'king' || piece.type === 'rook' || piece.type === 'cannon' ? 7.2 : 4.8;
               }
             }
 
@@ -5975,11 +7137,11 @@ export function initWizardChess() {
             }
 
             // Piece-scaled impact camera tremor right when the blow shatters the defender (only when combatCameraZoomEnabled is explicitly opted in)
-            const shakeSpan = piece.type === 'rook' || piece.type === 'king' ? 0.34 : 0.26;
+            const shakeSpan = piece.type === 'rook' || piece.type === 'king' || piece.type === 'cannon' ? 0.34 : 0.26;
             if (activeDuelCamSwoop && shatterTriggered && elapsed >= impactActualTime && elapsed <= impactActualTime + shakeSpan) {
               const shakeProgress = (elapsed - impactActualTime) / shakeSpan;
               const decay = (1 - shakeProgress) * (1 - shakeProgress);
-              const baseAmp = piece.type === 'rook' ? 0.046 : piece.type === 'king' ? 0.042 : 0.026;
+              const baseAmp = piece.type === 'rook' || piece.type === 'cannon' ? 0.046 : piece.type === 'king' ? 0.042 : 0.026;
               const amp = baseAmp * decay;
               camera.position.y += Math.sin(shakeProgress * Math.PI * 10) * amp;
             }
@@ -6057,6 +7219,9 @@ export function initWizardChess() {
     // Single-Player Multi-Tier Minimax AI (Novice / Tactical / Grandmaster)
     // =========================================================================
     function chooseSmartAIMove(color) {
+      if (gameVariant === 'xiangqi') {
+        return chooseBestXiangqiMove(extractPureXiangqiBoard(boardState), color, aiDifficulty);
+      }
       return chooseBestAIMove(extractPureBoard(boardState), color, aiDifficulty, enPassantTarget);
     }
 
@@ -6083,20 +7248,29 @@ export function initWizardChess() {
       syncActionButtonsUI();
       try {
         const epSnap = enPassantTarget ? { ...enPassantTarget } : null;
-        const chosen = await chooseBestAIMoveAsync(
-          extractPureBoard(boardState),
-          targetTurn,
-          aiDifficulty,
-          epSnap,
-          {
-            timeSliceMs: 4,
-            shouldCancel: () =>
-              scheduledJobId !== aiJobId ||
-              currentTurn !== targetTurn ||
-              isAnimatingMove ||
-              gameOver
-          }
-        );
+        const cancelOpts = {
+          timeSliceMs: 4,
+          shouldCancel: () =>
+            scheduledJobId !== aiJobId ||
+            currentTurn !== targetTurn ||
+            isAnimatingMove ||
+            gameOver
+        };
+        const chosen =
+          gameVariant === 'xiangqi'
+            ? await chooseBestXiangqiMoveAsync(
+                extractPureXiangqiBoard(boardState),
+                targetTurn,
+                aiDifficulty,
+                cancelOpts
+              )
+            : await chooseBestAIMoveAsync(
+                extractPureBoard(boardState),
+                targetTurn,
+                aiDifficulty,
+                epSnap,
+                cancelOpts
+              );
         if (
           !chosen ||
           scheduledJobId !== aiJobId ||
@@ -6145,24 +7319,33 @@ export function initWizardChess() {
           syncActionButtonsUI();
           try {
             const epSnap = enPassantTarget ? { ...enPassantTarget } : null;
-            const chosen = await chooseBestAIMoveAsync(
-              extractPureBoard(boardState),
-              aiColor,
-              aiDifficulty,
-              epSnap,
-              {
-                timeSliceMs: 4,
-                shouldCancel: () =>
-                  scheduledJobId !== aiJobId ||
-                  scriptedGameActive ||
-                  gameMode !== 'single' ||
-                  isPassAndPlay ||
-                  !aiAutoPlay ||
-                  currentTurn !== aiColor ||
-                  isAnimatingMove ||
-                  gameOver
-              }
-            );
+            const cancelOpts = {
+              timeSliceMs: 4,
+              shouldCancel: () =>
+                scheduledJobId !== aiJobId ||
+                scriptedGameActive ||
+                gameMode !== 'single' ||
+                isPassAndPlay ||
+                !aiAutoPlay ||
+                currentTurn !== aiColor ||
+                isAnimatingMove ||
+                gameOver
+            };
+            const chosen =
+              gameVariant === 'xiangqi'
+                ? await chooseBestXiangqiMoveAsync(
+                    extractPureXiangqiBoard(boardState),
+                    aiColor,
+                    aiDifficulty,
+                    cancelOpts
+                  )
+                : await chooseBestAIMoveAsync(
+                    extractPureBoard(boardState),
+                    aiColor,
+                    aiDifficulty,
+                    epSnap,
+                    cancelOpts
+                  );
             if (
               !chosen ||
               scheduledJobId !== aiJobId ||
@@ -6700,6 +7883,11 @@ export function initWizardChess() {
           closeSkinShopModal();
           return;
         }
+        if (document.getElementById('game-selector-overlay')?.classList.contains('visible')) {
+          e.preventDefault();
+          closeGameSelectorModal();
+          return;
+        }
       }
       if (isTypingInInput(document.activeElement)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -6770,13 +7958,22 @@ export function initWizardChess() {
       const titleEl = document.getElementById('checkmate-title');
       const subEl = document.getElementById('checkmate-subtitle');
 
-      const winnerName = winnerColor === 'w' ? 'White' : 'Black';
-      const defeatedName = defeatedColor === 'w' ? 'White' : 'Black';
-
-      if (crownEl) crownEl.textContent = winnerColor === 'w' ? '♔' : '♚';
-      if (titleEl) titleEl.textContent = 'Checkmate';
-      if (subEl) {
-        subEl.textContent = `${winnerName} Triumphs • The ${defeatedName} King Has Fallen`;
+      if (gameVariant === 'xiangqi') {
+        const winnerNameXq = winnerColor === 'w' ? 'Phe Đỏ (Hồng)' : 'Phe Đen (Hắc)';
+        const defeatedGeneralXq = defeatedColor === 'w' ? 'Nguyên Soái Đỏ (帥)' : 'Chủ Tướng Đen (將)';
+        if (crownEl) crownEl.textContent = winnerColor === 'w' ? '帥' : '將';
+        if (titleEl) titleEl.textContent = 'Tuyệt Sát (Chiếu Bí)';
+        if (subEl) {
+          subEl.textContent = `${winnerNameXq} Toàn Thắng • ${defeatedGeneralXq} Đã Thất Thủ`;
+        }
+      } else {
+        const winnerName = winnerColor === 'w' ? 'White' : 'Black';
+        const defeatedName = defeatedColor === 'w' ? 'White' : 'Black';
+        if (crownEl) crownEl.textContent = winnerColor === 'w' ? '♔' : '♚';
+        if (titleEl) titleEl.textContent = 'Checkmate';
+        if (subEl) {
+          subEl.textContent = `${winnerName} Triumphs • The ${defeatedName} King Has Fallen`;
+        }
       }
       if (overlay) {
         overlay.classList.add('visible');
@@ -6786,14 +7983,19 @@ export function initWizardChess() {
 
     function triggerCheckmateSequence(defeatedColor = currentTurn, winnerColor = null) {
       const actualWinner = winnerColor || (defeatedColor === 'w' ? 'b' : 'w');
+      const rows = getBoardRows();
+      const cols = getBoardCols();
+      const sqSize = getActiveSqSize();
+      const halfC = (cols - 1) * 0.5;
+      const halfR = (rows - 1) * 0.5;
 
       // Find the defeated King on the board
       let kingPiece = null;
       let kingR = -1;
       let kingC = -1;
-      for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
-          const p = boardState[r][c];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const p = boardState[r]?.[c];
           if (p && p.type === 'king' && p.color === defeatedColor) {
             kingPiece = p;
             kingR = r;
@@ -6823,9 +8025,9 @@ export function initWizardChess() {
         }
       }
       if (!attackerPos) {
-        for (let r = 0; r < 8; r++) {
-          for (let c = 0; c < 8; c++) {
-            const p = boardState[r][c];
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const p = boardState[r]?.[c];
             if (p && p.color === actualWinner) {
               const moves = getPseudoMovesForPiece(r, c, boardState);
               if (moves.some((m) => m.r === kingR && m.c === kingC)) {
@@ -6857,12 +8059,12 @@ export function initWizardChess() {
         // Check where the King's crown (0.50m from base) lands in board coordinates
         const tipWorldX = homePos.x + dx * 0.44;
         const tipWorldZ = homePos.z + dz * 0.44;
-        const tipC = Math.round(tipWorldX / BOARD_SQ_SIZE + 3.5);
-        const tipR = Math.round(tipWorldZ / BOARD_SQ_SIZE + 3.5);
+        const tipC = Math.round(tipWorldX / sqSize + halfC);
+        const tipR = Math.round(tipWorldZ / sqSize + halfR);
 
         let score = 0;
-        // Prefer staying inside the 8x8 board surface
-        if (tipR >= 0 && tipR < 8 && tipC >= 0 && tipC < 8) {
+        // Prefer staying inside the board surface
+        if (tipR >= 0 && tipR < rows && tipC >= 0 && tipC < cols) {
           score += 40;
           const occ = boardState[tipR]?.[tipC];
           if (!occ) {
@@ -7059,13 +8261,23 @@ export function initWizardChess() {
         btnQuickUndo.style.opacity = canUndo ? '1' : '0.45';
       }
       if (turnText && !gameOver && aiSearchInFlight) {
-        const turnLabel = currentTurn === 'w' ? 'White to Move' : 'Black to Move';
+        const turnLabel =
+          gameVariant === 'xiangqi'
+            ? currentTurn === 'w'
+              ? 'Lượt Phe Đỏ (Hồng)'
+              : 'Lượt Phe Đen (Hắc)'
+            : currentTurn === 'w'
+              ? 'White to Move'
+              : 'Black to Move';
         turnText.textContent = `${turnLabel} (AI)...`;
       }
       if (typeof updateScriptBarUI === 'function') updateScriptBarUI();
     }
 
     function updateTurnUI() {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.dataset.gameVariant = gameVariant;
+      }
       const turnDot = document.getElementById('turn-dot');
       const turnText = document.getElementById('turn-text');
       const modeBadge = document.getElementById('mode-badge');
@@ -7073,8 +8285,19 @@ export function initWizardChess() {
       const btnAiDiff = document.getElementById('btn-ai-difficulty');
       const btnAudio = document.getElementById('btn-audio-toggle');
       const btnSideToggle = document.getElementById('btn-side-toggle');
+      const btnGameVariant = document.getElementById('btn-game-variant');
+      const btnQuickVariant = document.getElementById('btn-quick-variant');
       const roomPill = document.getElementById('room-pill');
       const capturedTray = document.getElementById('captured-tray');
+
+      if (btnGameVariant) {
+        btnGameVariant.textContent = gameVariant === 'xiangqi' ? '🀄 Cờ Tướng 3D' : '♟️ Cờ Vua 3D';
+        btnGameVariant.classList.toggle('active', gameVariant === 'xiangqi');
+      }
+      if (btnQuickVariant) {
+        btnQuickVariant.textContent = gameVariant === 'xiangqi' ? '🀄 Tướng' : '♟️ Vua';
+        btnQuickVariant.classList.toggle('active', gameVariant === 'xiangqi');
+      }
 
       if (turnDot) {
         turnDot.className = 'turn-dot' + (currentTurn === 'b' ? ' black' : '');
@@ -7082,17 +8305,36 @@ export function initWizardChess() {
 
       updateTacticalBoardMarkers();
 
-      const pureB = extractPureBoard(boardState);
       const legalMoves = getAllLegalMoves(currentTurn);
       const inCheck = isKingInCheck(currentTurn, boardState);
-      const drawEval = evaluateDrawState(pureB, currentTurn, halfMoveClock, positionHistory, enPassantTarget);
+      const drawEval =
+        gameVariant === 'xiangqi'
+          ? evaluateXiangqiDrawState(
+              extractPureXiangqiBoard(boardState),
+              currentTurn,
+              halfMoveClock,
+              positionHistory
+            )
+          : evaluateDrawState(
+              extractPureBoard(boardState),
+              currentTurn,
+              halfMoveClock,
+              positionHistory,
+              enPassantTarget
+            );
 
       if (legalMoves.length === 0) {
         gameOver = true;
-        if (inCheck) {
+        // In Xiangqi, Stalemate (Hết nước đi) is a LOSS for the stalemated player!
+        if (inCheck || gameVariant === 'xiangqi') {
           drawReason = '';
-          const winner = currentTurn === 'w' ? 'Black' : 'White';
-          if (turnText) turnText.textContent = `Checkmate — ${winner} Wins`;
+          if (gameVariant === 'xiangqi') {
+            const winnerXq = currentTurn === 'w' ? 'Phe Đen (Hắc)' : 'Phe Đỏ (Hồng)';
+            if (turnText) turnText.textContent = `Tuyệt Sát — ${winnerXq} Thắng`;
+          } else {
+            const winner = currentTurn === 'w' ? 'Black' : 'White';
+            if (turnText) turnText.textContent = `Checkmate — ${winner} Wins`;
+          }
           if (!checkmateState.active) {
             wizardAudio.playCheckmateFanfare();
             triggerCheckmateSequence(currentTurn, currentTurn === 'w' ? 'b' : 'w');
@@ -7104,17 +8346,30 @@ export function initWizardChess() {
       } else if (drawEval.isDraw) {
         gameOver = true;
         drawReason = drawEval.reason;
-        if (turnText) turnText.textContent = `Draw — ${drawEval.reason}`;
+        if (turnText) {
+          turnText.textContent =
+            gameVariant === 'xiangqi' ? `Hòa Cờ — ${drawEval.reason}` : `Draw — ${drawEval.reason}`;
+        }
       } else {
         drawReason = '';
-        const turnLabel = currentTurn === 'w' ? 'White to Move' : 'Black to Move';
+        const turnLabel =
+          gameVariant === 'xiangqi'
+            ? currentTurn === 'w'
+              ? 'Lượt Phe Đỏ (Hồng)'
+              : 'Lượt Phe Đen (Hắc)'
+            : currentTurn === 'w'
+              ? 'White to Move'
+              : 'Black to Move';
         const aiColor = playerColor === 'w' ? 'b' : 'w';
         const isAiTurn =
           aiSearchInFlight ||
           (!scriptedGameActive && gameMode === 'single' && !isPassAndPlay && aiAutoPlay && currentTurn === aiColor);
         if (inCheck) {
           wizardAudio.playCheckWarning();
-          if (turnText) turnText.textContent = `${turnLabel} (Check!)`;
+          if (turnText) {
+            turnText.textContent =
+              gameVariant === 'xiangqi' ? `${turnLabel} (Chiếu Tướng!)` : `${turnLabel} (Check!)`;
+          }
         } else if (isAiTurn) {
           if (turnText) turnText.textContent = `${turnLabel} (AI)...`;
         } else {
@@ -7124,7 +8379,14 @@ export function initWizardChess() {
 
       if (modeBadge) {
         if (gameMode === 'multi' && roomCode) {
-          const sideLabel = playerColor === 'w' ? 'White' : 'Black';
+          const sideLabel =
+            gameVariant === 'xiangqi'
+              ? playerColor === 'w'
+                ? 'Phe Đỏ'
+                : 'Phe Đen'
+              : playerColor === 'w'
+                ? 'White'
+                : 'Black';
           const statusSuffix = roomBothReady
             ? '2/2'
             : roomInviteCopied
@@ -7132,9 +8394,15 @@ export function initWizardChess() {
               : 'Waiting';
           modeBadge.textContent = `Room ${roomCode} • ${sideLabel} (${statusSuffix})`;
         } else if (isPassAndPlay) {
-          modeBadge.textContent = `2 Players • ${currentTurn === 'w' ? 'White' : 'Black'}`;
+          modeBadge.textContent =
+            gameVariant === 'xiangqi'
+              ? `2 Người • ${currentTurn === 'w' ? 'Phe Đỏ' : 'Phe Đen'}`
+              : `2 Players • ${currentTurn === 'w' ? 'White' : 'Black'}`;
         } else {
-          modeBadge.textContent = `Playing as ${playerColor === 'w' ? 'White' : 'Black'}`;
+          modeBadge.textContent =
+            gameVariant === 'xiangqi'
+              ? `Đang cầm: ${playerColor === 'w' ? 'Phe Đỏ (Hồng)' : 'Phe Đen (Hắc)'}`
+              : `Playing as ${playerColor === 'w' ? 'White' : 'Black'}`;
         }
       }
       if (btnAiMove) {
@@ -7189,6 +8457,8 @@ export function initWizardChess() {
           btnSideToggle.textContent = '🚪 Rời Phòng Online';
         } else if (isPassAndPlay) {
           btnSideToggle.textContent = autoFlipCamera2P ? 'Auto-Flip: On' : 'Auto-Flip: Off';
+        } else if (gameVariant === 'xiangqi') {
+          btnSideToggle.textContent = playerColor === 'w' ? 'Đổi Quân: Cầm Đen' : 'Đổi Quân: Cầm Đỏ';
         } else {
           btnSideToggle.textContent = playerColor === 'w' ? 'Đổi Quân: Cầm Đen' : 'Đổi Quân: Cầm Trắng';
         }
@@ -7197,9 +8467,20 @@ export function initWizardChess() {
         roomPill.style.display = 'none';
       }
 
+      document.querySelectorAll('[data-set-variant]').forEach((el) => {
+        const v = el.getAttribute('data-set-variant');
+        el.classList.toggle('active', v === gameVariant);
+      });
+
       if (capturedTray) {
         if (capturedByWhite > 0 || capturedByBlack > 0) {
-          capturedTray.textContent = `Captured — White: ${capturedByWhite} | Black: ${capturedByBlack}`;
+          const matAdv = computeMaterialAdvantage();
+          const wAdvStr = matAdv > 0 ? ` (+${Number.isInteger(matAdv) ? matAdv : matAdv.toFixed(1)})` : '';
+          const bAdvStr = matAdv < 0 ? ` (+${Number.isInteger(-matAdv) ? -matAdv : (-matAdv).toFixed(1)})` : '';
+          capturedTray.textContent =
+            gameVariant === 'xiangqi'
+              ? `Quân Đã Ăn — Đỏ: ${capturedByWhite}${wAdvStr} | Đen: ${capturedByBlack}${bAdvStr}`
+              : `Captured — White: ${capturedByWhite}${wAdvStr} | Black: ${capturedByBlack}${bAdvStr}`;
         } else {
           capturedTray.textContent = '';
         }
@@ -7207,6 +8488,32 @@ export function initWizardChess() {
       updatePieceLabelUI();
       syncActionButtonsUI();
       updatePieceOverheadOverlay();
+    }
+
+    function computeMaterialAdvantage() {
+      const chessVal = { pawn: 1, knight: 3, bishop: 3, rook: 5, queen: 9, king: 0 };
+      const xiangqiVal = { pawn: 1, advisor: 2, elephant: 2, knight: 4, cannon: 4.5, rook: 9, king: 0 };
+      let wScore = 0;
+      let bScore = 0;
+      for (let r = 0; r < getBoardRows(); r++) {
+        for (let c = 0; c < getBoardCols(); c++) {
+          const p = boardState[r]?.[c];
+          if (!p) continue;
+          let val = 0;
+          if (gameVariant === 'xiangqi') {
+            val = xiangqiVal[p.type] || 0;
+            if (p.type === 'pawn') {
+              const crossed = p.color === 'w' ? r <= 4 : r >= 5;
+              if (crossed) val = 2;
+            }
+          } else {
+            val = chessVal[p.type] || 0;
+          }
+          if (p.color === 'w') wScore += val;
+          else bScore += val;
+        }
+      }
+      return Number((wScore - bScore).toFixed(1));
     }
 
     // =========================================================================
@@ -7303,9 +8610,11 @@ export function initWizardChess() {
       raycaster.setFromCamera(pointer, camera);
 
       const pieceHitboxProxies = [];
-      for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
-          const p = boardState[r][c];
+      const rows = getBoardRows();
+      const cols = getBoardCols();
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const p = boardState[r]?.[c];
           if (p && p.hitbox) {
             if (p.mesh) p.mesh.updateMatrixWorld(true);
             pieceHitboxProxies.push(p.hitbox);
@@ -7313,7 +8622,10 @@ export function initWizardChess() {
         }
       }
 
-      const hits = raycaster.intersectObjects([...pieceHitboxProxies, ...boardSquareMeshes], false);
+      const hits =
+        gameVariant === 'xiangqi'
+          ? raycaster.intersectObjects([...pieceHitboxProxies, ...getActiveBoardSquareMeshes()], false)
+          : raycaster.intersectObjects([...pieceHitboxProxies, ...boardSquareMeshes], false);
 
       let clickedR = -1;
       let clickedC = -1;
@@ -7392,9 +8704,9 @@ export function initWizardChess() {
         let bestPieceR = -1;
         let bestPieceC = -1;
         let bestPieceDistPx = 24;
-        for (let r = 0; r < 8; r++) {
-          for (let c = 0; c < 8; c++) {
-            const p = boardState[r][c];
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const p = boardState[r]?.[c];
             if (p) {
               const sc = projectBoardSquareToScreen(r, c, rect);
               const rawDist = Math.hypot(e.clientX - sc.x, e.clientY - sc.y);
@@ -7439,7 +8751,12 @@ export function initWizardChess() {
             triggerTouchHaptic(move.capture ? [16, 24, 20] : 12);
           }
           const movingPiece = boardState[selectedSquare.r]?.[selectedSquare.c];
-          if (movingPiece && movingPiece.type === 'pawn' && (move.r === 0 || move.r === 7)) {
+          if (
+            gameVariant !== 'xiangqi' &&
+            movingPiece &&
+            movingPiece.type === 'pawn' &&
+            (move.r === 0 || move.r === 7)
+          ) {
             const promoOverlay = document.getElementById('promotion-overlay');
             if (promoOverlay) {
               openPromotionModal(selectedSquare.r, selectedSquare.c, move.r, move.c, currentTurn);
@@ -7634,6 +8951,21 @@ export function initWizardChess() {
         }
       }
 
+      if (room.gameVariant === 'xiangqi' || room.gameVariant === 'chess') {
+        if (room.gameVariant !== gameVariant) {
+          gameVariant = room.gameVariant;
+          chessBoardDeckGroup.visible = gameVariant === 'chess';
+          xiangqiBoardDeckGroup.visible = gameVariant === 'xiangqi';
+          if (gameVariant === 'xiangqi') {
+            ensureXiangqiModelsLoaded().then(() => {
+              resetChessBoard(false);
+            });
+          } else {
+            resetChessBoard(false);
+          }
+        }
+      }
+
       if (room.whiteSkin && PIECE_THEMES[room.whiteSkin] && room.whiteSkin !== activeSkinWhite) {
         applyPieceTheme(room.whiteSkin, 'w');
       }
@@ -7720,7 +9052,8 @@ export function initWizardChess() {
         body: JSON.stringify({
           preferredColor,
           playerToken,
-          skinId: preferredColor === 'b' ? activeSkinBlack : activeSkinWhite
+          skinId: preferredColor === 'b' ? activeSkinBlack : activeSkinWhite,
+          gameVariant
         })
       });
 
@@ -7735,6 +9068,7 @@ export function initWizardChess() {
         const staticRoom = {
           code: genCode,
           status: 'waiting',
+          gameVariant,
           whiteJoined: side === 'w',
           blackJoined: side === 'b',
           whiteSkin: side === 'w' ? activeSkinWhite : 'hogwarts',
@@ -8029,9 +9363,9 @@ export function initWizardChess() {
           document.getElementById(id)?.classList.contains('active')
         );
         if (!hasActivePreset) {
-          playerCamSide = playerColor === 'b' ? 'b' : 'w';
-          setActiveCamButton('btn-cam-player');
-          setCameraForSide(playerCamSide, false);
+          overheadCamSide = playerColor === 'b' ? 'b' : 'w';
+          setActiveCamButton('btn-cam-top');
+          setOverheadCameraForSide(overheadCamSide, false);
         }
       }
       updateCameraLockUI();
@@ -8245,6 +9579,109 @@ export function initWizardChess() {
 
     document.getElementById('btn-reset')?.addEventListener('click', () => {
       handleGameResetAction();
+    });
+
+    function syncGameSelectorUI() {
+      const cardChess = document.getElementById('card-select-chess');
+      const cardXiangqi = document.getElementById('card-select-xiangqi');
+      const badgeChess = document.getElementById('badge-active-chess');
+      const badgeXiangqi = document.getElementById('badge-active-xiangqi');
+      if (cardChess) cardChess.classList.toggle('selected', gameVariant === 'chess');
+      if (cardXiangqi) cardXiangqi.classList.toggle('selected', gameVariant === 'xiangqi');
+      if (badgeChess) {
+        badgeChess.textContent = gameVariant === 'chess' ? '✓ Đang Chọn' : 'Sẵn Sàng';
+      }
+      if (badgeXiangqi) {
+        badgeXiangqi.textContent = gameVariant === 'xiangqi' ? '✓ Đang Chọn' : 'MỚI RA MẮT';
+      }
+    }
+
+    function openGameSelectorModal() {
+      syncGameSelectorUI();
+      document.getElementById('game-selector-overlay')?.classList.add('visible');
+    }
+
+    function closeGameSelectorModal() {
+      document.getElementById('game-selector-overlay')?.classList.remove('visible');
+    }
+
+    function setGameVariant(nextVariant) {
+      const normalized = nextVariant === 'xiangqi' ? 'xiangqi' : 'chess';
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.dataset.gameVariant = normalized;
+      }
+      if (gameVariant === normalized && boardState.length === getBoardRows()) {
+        syncGameSelectorUI();
+        closeGameSelectorModal();
+        updateTurnUI();
+        return gameVariant;
+      }
+      cancelPendingAISearch();
+      hidePromotionModal();
+      scriptedGameActive = false;
+      scriptDeviated = false;
+      preMoveHighlightTask = null;
+      gameVariant = normalized;
+      chessBoardDeckGroup.visible = gameVariant === 'chess';
+      xiangqiBoardDeckGroup.visible = gameVariant === 'xiangqi';
+      applyPieceTheme(currentPieceThemeId, 'both');
+      resetChessBoard(true, false);
+      syncGameSelectorUI();
+      closeGameSelectorModal();
+      renderer.shadowMap.needsUpdate = true;
+      renderer.render(scene, camera);
+      return gameVariant;
+    }
+
+    function toggleGameVariant() {
+      return setGameVariant(gameVariant === 'xiangqi' ? 'chess' : 'xiangqi');
+    }
+
+    document.getElementById('btn-game-variant')?.addEventListener('click', () => {
+      const overlay = document.getElementById('game-selector-overlay');
+      if (overlay && !overlay.classList.contains('visible')) {
+        openGameSelectorModal();
+      } else {
+        toggleGameVariant();
+      }
+    });
+    document.getElementById('btn-quick-variant')?.addEventListener('click', () => {
+      const overlay = document.getElementById('game-selector-overlay');
+      if (overlay && !overlay.classList.contains('visible')) {
+        openGameSelectorModal();
+      } else {
+        toggleGameVariant();
+      }
+    });
+    document.getElementById('card-select-chess')?.addEventListener('click', () => {
+      setGameVariant('chess');
+    });
+    document.getElementById('btn-select-chess')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setGameVariant('chess');
+    });
+    document.getElementById('card-select-xiangqi')?.addEventListener('click', () => {
+      setGameVariant('xiangqi');
+    });
+    document.getElementById('btn-select-xiangqi')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setGameVariant('xiangqi');
+    });
+    document.getElementById('btn-selector-close')?.addEventListener('click', () => {
+      closeGameSelectorModal();
+    });
+    document.querySelectorAll('[data-set-variant]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const targetVar = btn.getAttribute('data-set-variant');
+        if (targetVar === 'chess' || targetVar === 'xiangqi') {
+          setGameVariant(targetVar);
+        }
+      });
+    });
+    document.getElementById('game-selector-overlay')?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        closeGameSelectorModal();
+      }
     });
 
     // =========================================================================
@@ -8532,6 +9969,14 @@ export function initWizardChess() {
       LOCOMOTION_GAIT_PROFILES,
       ROLE_SCALE_MULTIPLIERS,
       PIECE_ROLE_METADATA,
+      XIANGQI_ROLE_METADATA,
+      setGameVariant,
+      toggleGameVariant,
+      openGameSelectorModal,
+      closeGameSelectorModal,
+      getGameVariant: () => gameVariant,
+      getXiangqiBlockedPointsForPiece: (r, c) =>
+        getXiangqiBlockedPointsForPiece(extractPureXiangqiBoard(boardState), r, c),
       setCombatCameraZoomEnabled: (enabled) => {
         combatCameraZoomEnabled = Boolean(enabled);
         return combatCameraZoomEnabled;
@@ -8541,7 +9986,14 @@ export function initWizardChess() {
       cyclePieceLabelMode,
       getPieceLabelMode: () => pieceLabelMode,
       inspectSquare: (r, c) => {
-        if (typeof r !== 'number' || typeof c !== 'number' || r < 0 || r > 7 || c < 0 || c > 7) {
+        if (
+          typeof r !== 'number' ||
+          typeof c !== 'number' ||
+          r < 0 ||
+          r >= getBoardRows() ||
+          c < 0 ||
+          c >= getBoardCols()
+        ) {
           clearSquareHighlights();
           selectedSquare = null;
           inspectedSquare = null;
@@ -8717,7 +10169,11 @@ export function initWizardChess() {
           boardState[p.r][p.c] = inst;
         }
         currentTurn = turn;
-        positionHistory = [computePositionHash(extractPureBoard(boardState), currentTurn, enPassantTarget)];
+        positionHistory = [
+          gameVariant === 'xiangqi'
+            ? computeXiangqiPositionHash(extractPureXiangqiBoard(boardState), currentTurn)
+            : computePositionHash(extractPureBoard(boardState), currentTurn, enPassantTarget)
+        ];
         updateTurnUI();
         renderer.render(scene, camera);
       },
@@ -8741,6 +10197,9 @@ export function initWizardChess() {
         return executeChessMove(4, 4, 3, 3);
       },
       getState: () => ({
+        gameVariant,
+        boardRows: getBoardRows(),
+        boardCols: getBoardCols(),
         gameMode,
         isPassAndPlay,
         autoFlipCamera2P,
@@ -9154,9 +10613,11 @@ export function initWizardChess() {
 
       if (shatterDebris.length > 0) {
         const pieceCoords = [];
-        for (let r = 0; r < 8; r++) {
-          for (let c = 0; c < 8; c++) {
-            const p = boardState[r][c];
+        const rows = getBoardRows();
+        const cols = getBoardCols();
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const p = boardState[r]?.[c];
             if (p && p.mesh) {
               pieceCoords.push(p.mesh.position.x, p.mesh.position.z);
             }
@@ -9443,7 +10904,20 @@ export function initWizardChess() {
         const params = new URLSearchParams(window.location.search);
         const urlSide = params.get('side');
         const urlMode = (params.get('mode') || '').toLowerCase();
+        const urlVariant = (params.get('variant') || params.get('game') || '').toLowerCase();
         const urlRoom = (params.get('room') || '').trim().toUpperCase();
+        if (urlVariant === 'xiangqi' || urlVariant === 'cotuong') {
+          gameVariant = 'xiangqi';
+          chessBoardDeckGroup.visible = false;
+          xiangqiBoardDeckGroup.visible = true;
+          closeGameSelectorModal();
+        } else if (urlVariant === 'chess' || urlVariant === 'covua') {
+          closeGameSelectorModal();
+        }
+        if (urlRoom) {
+          closeGameSelectorModal();
+        }
+        syncGameSelectorUI();
         if (urlMode === '2p' || urlMode === 'pass' || urlMode === 'hotseat') {
           isPassAndPlay = true;
           aiAutoPlay = false;
