@@ -71,7 +71,7 @@ pr: PR B
      - `postComposer.setPixelRatio(currentActiveDpr); postComposer.setSize(window.innerWidth, window.innerHeight);`
      - Read the drawing buffer size `w, h`. If `postPasses.gtao`, call `postPasses.gtao.setSize(Math.ceil(w / 2), Math.ceil(h / 2))`. This makes GTAO half resolution; it must run **after** `postComposer.setSize`, which sets every pass to full size.
      - Do not touch `postPasses.bloom.resolution`: it is only read in the constructor, and `UnrealBloomPass.setSize` (called by the composer) already halves its internal targets.
-  6. Call `buildPostComposer(qualityTier)` once after `scene` and `camera` exist (after line ~361). Listen to `wizardchess:visual-settings` and call `buildPostComposer(detail.qualityTier)` when the tier changed.
+  6. Call `buildPostComposer(qualityTier)` once after `scene` and `camera` exist (after line ~361). Listen to `wizardchess:visual-settings` and call `buildPostComposer(detail.qualityTier)` when the tier changed. Keep a `builtTier` variable and return early from the listener when `detail.qualityTier === builtTier`: the event also fires for Motion changes and from inside `feedFrameTimeSample`. The event only fires on changes, so the first build must read `qualityTier` directly.
   7. In the existing `webglcontextlost` handler (search `isWebGLContextLost = true`) call `disposePostComposer()`. In the `webglcontextrestored` handler call `buildPostComposer(qualityTier)`.
 - **Success criteria:** composer exists on `high` and `ultra`; none on `base`.
 - **Verify:** covered by Task 4.4.

@@ -73,7 +73,7 @@ pr: PR B
 ### Task 7.4 — Expose tier and motion to CSS
 
 - **Steps:**
-  1. In `src/wizardChessEngine.js`, where phase 1 sets `qualityTier` and `motionLevel` (start-up and the `setMotionLevel`/`setQualityTier`/downgrade paths), set `document.body.dataset.qualityTier = qualityTier` and `document.body.dataset.motion = motionLevel`.
+  1. In `src/wizardChessEngine.js`, set `document.body.dataset.qualityTier = qualityTier` and `document.body.dataset.motion = motionLevel` inside `announceVisualSettings()` (the single place every change goes through), and also once at start-up right after the phase 1 block, because the event only fires on changes.
   2. Add `const supportsSvgBackdrop = 'userAgentData' in navigator && CSS.supports?.('backdrop-filter', 'url(#a)') === true;` and set `document.body.classList.toggle('svg-backdrop', supportsSvgBackdrop)` once at start-up. `navigator.userAgentData` exists only in Chromium browsers, so Safari and Firefox never get the refraction even if they parse the value.
 - **Verify:** no verification needed; Task 7.6 reads the attributes.
 

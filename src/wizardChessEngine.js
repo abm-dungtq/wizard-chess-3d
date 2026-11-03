@@ -1,6 +1,8 @@
 import * as THREE_NS from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
@@ -278,10 +280,13 @@ export function initWizardChess() {
     let qualityTier = qualityPreference === 'auto' ? detectQualityTier() : qualityPreference;
     let qualityTierSource = qualityPreference === 'auto' ? 'auto' : 'saved';
     let slowFrameSeconds = 0;
+    let lastTierAdjustTime = 0;
 
     function announceVisualSettings() {
       window.dispatchEvent(
-        new CustomEvent('wizardchess:visual-settings', { detail: { motionLevel, qualityTier } })
+        new CustomEvent('wizardchess:visual-settings', {
+          detail: { motionLevel, qualityTier, qualityTierSource, qualityPreference }
+        })
       );
     }
 
@@ -2316,6 +2321,9 @@ export function initWizardChess() {
     // Asset Loading (Cathedral GLB + 12 Rigged Piece GLBs)
     // =========================================================================
     const gltfLoader = new GLTFLoader();
+    gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+    // Relative path, like the model URLs, so the game also works from a sub-path.
+    gltfLoader.setKTX2Loader(new KTX2Loader().setTranscoderPath('./assets/basis/').detectSupport(renderer));
     const pieceTemplates = {};
     const activeMixers = [];
     const shatterDebris = [];
@@ -3565,43 +3573,48 @@ export function initWizardChess() {
       return setFloorStoneLook(0);
     }
 
-    const ASSET_CACHE_VER = 'v=masterwork_v2';
+    const ASSET_FORMAT = 'glb'; // 'b64' restores the old gzip+base64 files
+    const ASSET_CACHE_VER = 'v=meshopt_v1';
+
+    async function fetchB64Model(baseName) {
+      const resB64 = await fetch(`./assets/glb/${baseName}.glb.gz.b64?${ASSET_CACHE_VER}`);
+      if (!resB64.ok) throw new Error(`Failed to fetch ${baseName}`);
+      const b64Text = (await resB64.text()).trim();
+      let gzBytes = null;
+      if (typeof Uint8Array.fromBase64 === 'function') {
+        try {
+          gzBytes = Uint8Array.fromBase64(b64Text);
+        } catch (e) {
+          gzBytes = null;
+        }
+      }
+      if (!gzBytes) {
+        const binStr = atob(b64Text);
+        gzBytes = new Uint8Array(binStr.length);
+        for (let i = 0; i < binStr.length; i++) {
+          gzBytes[i] = binStr.charCodeAt(i);
+        }
+      }
+      const stream = new Blob([gzBytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+      return new Response(stream).arrayBuffer();
+    }
+
+    // Cloudflare does not compress .glb, so models ship as .glb.gz and are inflated here.
+    async function fetchGlbModel(baseName) {
+      const res = await fetch(`./assets/glb/${baseName}.glb.gz?${ASSET_CACHE_VER}`);
+      // Unknown paths fall back to index.html, so an HTML answer is a missing model.
+      if (!res.ok || (res.headers.get('content-type') || '').includes('text/html')) {
+        throw new Error(`Failed to fetch ${baseName}`);
+      }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      // A server that adds Content-Encoding: gzip hands over bytes the browser already inflated.
+      if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return bytes.buffer;
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+      return new Response(stream).arrayBuffer();
+    }
 
     async function loadGltfModel(baseName) {
-      let arrayBuffer = null;
-      try {
-        const resB64 = await fetch(`./assets/glb/${baseName}.glb.gz.b64?${ASSET_CACHE_VER}`);
-        if (resB64.ok) {
-          const b64Text = (await resB64.text()).trim();
-          if (b64Text.length > 64) {
-            let gzBytes = null;
-            if (typeof Uint8Array.fromBase64 === 'function') {
-              try {
-                gzBytes = Uint8Array.fromBase64(b64Text);
-              } catch (e) {
-                gzBytes = null;
-              }
-            }
-            if (!gzBytes) {
-              const binStr = atob(b64Text);
-              gzBytes = new Uint8Array(binStr.length);
-              for (let i = 0; i < binStr.length; i++) {
-                gzBytes[i] = binStr.charCodeAt(i);
-              }
-            }
-            const ds = new DecompressionStream('gzip');
-            const stream = new Blob([gzBytes]).stream().pipeThrough(ds);
-            arrayBuffer = await new Response(stream).arrayBuffer();
-          }
-        }
-      } catch (e) {}
-
-      if (!arrayBuffer) {
-        const resGlb = await fetch(`./assets/glb/${baseName}.glb?${ASSET_CACHE_VER}`);
-        if (!resGlb.ok) throw new Error(`Failed to fetch ${baseName}`);
-        arrayBuffer = await resGlb.arrayBuffer();
-      }
-
+      const arrayBuffer = ASSET_FORMAT === 'b64' ? await fetchB64Model(baseName) : await fetchGlbModel(baseName);
       return new Promise((resolve, reject) => {
         gltfLoader.parse(arrayBuffer, './assets/glb/', (gltf) => resolve(gltf), (err) => reject(err));
       });
@@ -11121,13 +11134,18 @@ export function initWizardChess() {
     // Once DPR can drop no further, two seconds of slow frames lower the tier for this session only.
     function trackSlowFramesForTier(frameMs, dprAtFloor) {
       if (isAutomatedTest && !window.__WIZARD_ALLOW_TIER_DOWNGRADE__) return;
-      if (qualityTier === 'base' || rollingFrameMs <= 20.0 || !dprAtFloor) {
+      // Shader compiles and asset loads stall the first seconds; a fresh tier also needs time to settle.
+      const settling = elapsedTotal < 4 || elapsedTotal - lastTierAdjustTime < 3;
+      if (qualityTier === 'base' || settling || rollingFrameMs <= 20.0 || !dprAtFloor) {
         slowFrameSeconds = 0;
         return;
       }
-      slowFrameSeconds += frameMs / 1000;
+      // Cap each sample so one long hitch cannot count as two seconds of slow play.
+      slowFrameSeconds += Math.min(frameMs, 50) / 1000;
       if (slowFrameSeconds < 2) return;
       slowFrameSeconds = 0;
+      lastTierAdjustTime = elapsedTotal;
+      rollingFrameMs = 16.67;
       qualityTier = downgradeTier(qualityTier);
       qualityTierSource = 'downgraded';
       announceVisualSettings();

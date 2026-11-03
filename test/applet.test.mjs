@@ -2182,3 +2182,19 @@ test('visual settings resolve motion and quality tiers', async () => {
   assert.equal(downgradeTier('high'), 'base');
   assert.equal(downgradeTier('base'), 'base');
 });
+
+test('every model asset has a gzipped binary glb', () => {
+  const root = path.join(process.cwd(), 'public/assets/glb');
+  const walk = (dir) =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]
+    );
+  const sources = walk(root).filter((f) => f.endsWith('.glb.gz.b64'));
+  assert.ok(sources.length > 0);
+  for (const source of sources) {
+    const gz = source.replace(/\.glb\.gz\.b64$/, '.glb.gz');
+    assert.ok(fs.existsSync(gz), `missing ${path.relative(root, gz)}`);
+    assert.equal(zlib.gunzipSync(fs.readFileSync(gz)).subarray(0, 4).toString('ascii'), 'glTF', path.relative(root, gz));
+  }
+  assert.ok(fs.existsSync(path.join(process.cwd(), 'scripts/copy-basis-transcoder.mjs')));
+});

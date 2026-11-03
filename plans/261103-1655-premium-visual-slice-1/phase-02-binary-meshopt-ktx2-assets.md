@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Binary meshopt/KTX2 asset delivery"
-status: pending
+status: completed
 effort: 5h
 pr: PR A
 ---
@@ -160,7 +160,16 @@ pr: PR A
 
 ## Execution notes
 
-(fill in during execution)
+- Toolchain: `@gltf-transform/cli` 4.5.1 plus core/extensions/functions and `meshoptimizer`.
+- **KTX2 not applied yet.** KTX-Software (`ktx`/`toktx`) is not installed and is not in Homebrew; installing it needs the official `.pkg` from GitHub and sudo. The encoder prints `toktx not found ...` and keeps the cathedral's JPEG textures. Running `npm run glb:encode` again after installing KTX-Software will add ETC1S KTX2. The client already has `KTX2Loader` and the transcoder wired.
+- First `--check` run failed: `option8_cathedral: materialNames differ` (`Opt8_Column_Stone`, `Opt8_Lancet_Glass` merged by `dedup`). The engine looks those names up (around lines 4061 and 4122). Applied the remedy written in Task 2.3: `dedup` limited to accessors, meshes and textures. Second run: `CHECK OK 56`.
+- `prune` logs "Removed Skin (1)" for xiangqi files, but the check confirms every file keeps the same skin count as its source (xiangqi `rook_white`: 1 skin, 1 skinned node before and after).
+- `gltf-transform validate`: no errors on `king_white` and `option8_cathedral` (warnings only).
+- Visual check: idle and mid-move screenshots with the old b64 and the new files look identical (`visuals/asset-idle-old.png`, `visuals/asset-idle.png`). An attack clip was not captured separately.
+- Task 2.8: uncompressed first load = 11,912,913 bytes (bundle gzip 384,145 + 6 pieces + cathedral 9,267,648) > 10 MB, so Task 2.9 ran.
+- Task 2.9: models ship as `.glb.gz`; first load = 6,643,450 bytes. The loader inflates with `DecompressionStream` and skips that when the server already decoded it (Vite dev sends `Content-Encoding: gzip`; checked via the gzip magic bytes).
+- Deviation: plain `.glb` files are not committed or shipped. Only `.glb.gz` exists in `public/assets/glb` (56 files, 14.0 MB vs 37.9 MB of b64). The encoder writes the plain `.glb` to a temp file only for the optional KTX2 step, and `--check` and the unit test gunzip the `.glb.gz`.
+- Exit check: `tsc` clean, unit 31/31, e2e 16 passed + 1 pre-existing skip. Refetch-storm tests still pass.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.
