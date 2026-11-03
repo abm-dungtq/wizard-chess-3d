@@ -7043,7 +7043,11 @@ export function initWizardChess() {
                 piece.type === 'elephant' ||
                 piece.type === 'advisor'
               ) {
-                wizardAudio.playSignatureAttack(piece.type, 'windup');
+                wizardAudio.playSignatureAttack(piece.type, 'windup', {
+                  x: piece.mesh.position.x,
+                  y: BOARD_SURFACE_Y,
+                  z: piece.mesh.position.z
+                });
                 spawnSignatureCombatVFX(piece.type, 'windup', piece.mesh.position, endPos, dirX, dirZ, piece.color);
               }
             }
@@ -7213,8 +7217,9 @@ export function initWizardChess() {
               (atkClipTime >= CONTACT_CLIP_TIME || elapsed >= tContact + 0.06)
             ) {
               defenderFlinchTriggered = true;
-              wizardAudio.playWeaponClash();
-              wizardAudio.playSignatureAttack(piece.type, 'contact1');
+              const hitAt = { x: endPos.x, y: BOARD_SURFACE_Y, z: endPos.z };
+              wizardAudio.playWeaponClash(hitAt);
+              wizardAudio.playSignatureAttack(piece.type, 'contact1', hitAt);
               spawnSignatureCombatVFX(piece.type, 'contact1', piece.mesh.position, endPos, dirX, dirZ, piece.color);
               if (atkProfile.hitStopDuration > 0) {
                 hitStopRemaining = atkProfile.hitStopDuration;
@@ -7237,7 +7242,7 @@ export function initWizardChess() {
               atkClipTime >= SECOND_CONTACT_CLIP_TIME
             ) {
               secondHitTriggered = true;
-              wizardAudio.playSignatureAttack(piece.type, 'contact2');
+              wizardAudio.playSignatureAttack(piece.type, 'contact2', { x: endPos.x, y: BOARD_SURFACE_Y, z: endPos.z });
               spawnSignatureCombatVFX(piece.type, 'contact2', piece.mesh.position, endPos, dirX, dirZ, piece.color);
               impactFlashLight.intensity = 6.2;
             }
@@ -7245,8 +7250,9 @@ export function initWizardChess() {
             // Signature Finisher Burst: defender explodes with piece-specific VFX & directional/vortex debris!
             if (!shatterTriggered && (atkClipTime >= BLOW_CLIP_TIME || elapsed >= tImpact + 0.06)) {
               shatterTriggered = true;
-              wizardAudio.playStoneShatter();
-              wizardAudio.playSignatureAttack(piece.type, 'finisher');
+              const finisherAt = { x: endPos.x, y: BOARD_SURFACE_Y, z: endPos.z };
+              wizardAudio.playStoneShatter(finisherAt);
+              wizardAudio.playSignatureAttack(piece.type, 'finisher', finisherAt);
               impactActualTime = elapsed;
               postShatterPiecePos.copy(piece.mesh.position);
               spawnSignatureCombatVFX(piece.type, 'finisher', piece.mesh.position, endPos, dirX, dirZ, piece.color);
@@ -8700,6 +8706,19 @@ export function initWizardChess() {
       return validMoves.some(
         (m) => (m.r === r && m.c === c) || (m.castle && m.r === r && m.rookFromC === c)
       );
+    }
+
+    // The first gesture anywhere (HUD buttons included) starts audio, so the first move does not stall on context start-up.
+    const AUDIO_UNLOCK_EVENTS = ['pointerdown', 'keydown', 'touchend'];
+    const unlockAudioOnGesture = () => {
+      if (!wizardAudio.unlock()) return;
+      if (wizardAudio.getState().contextState !== 'running') return;
+      for (const type of AUDIO_UNLOCK_EVENTS) {
+        document.removeEventListener(type, unlockAudioOnGesture, { capture: true });
+      }
+    };
+    for (const type of AUDIO_UNLOCK_EVENTS) {
+      document.addEventListener(type, unlockAudioOnGesture, { capture: true, passive: true });
     }
 
     renderer.domElement.addEventListener('pointerdown', (e) => {
@@ -10707,9 +10726,12 @@ export function initWizardChess() {
     const _camForward = new THREE.Vector3();
     const _camRight = new THREE.Vector3();
     const _camHorizDir = new THREE.Vector3();
+    const _audioForward = new THREE.Vector3();
     function stepScene(dt, doRender = true) {
       elapsedTotal += dt;
       const prevCamPos = _prevCamPos.copy(camera.position);
+      // The listener trails the camera by one frame, which is inaudible; it is a no-op until audio runs.
+      wizardAudio.setListener(camera.position, camera.getWorldDirection(_audioForward), camera.up);
 
       if (isAnimatingMove && activeCombatMixers.size > 0) {
         idleMixerAccum += dt;

@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Audio unlock and HRTF bus"
-status: pending
+status: completed
 effort: 2h
 pr: PR A
 ---
@@ -98,7 +98,13 @@ Task 3.1 proves the stall exists and where it comes from before anything is chan
 
 ## Execution notes
 
-(fill in during execution)
+- Task 3.1 baseline (Chromium, max rAF delta in the 1.5 s after the first move):
+  - Canvas click first (`contextState` already `running`): 54.6, 55.3, 57.7 ms.
+  - HUD click first (`.brand-pill`; `#btn-cam-top` sits in the hidden menu): `contextState` was `none`; 294.1 ms on the first run, then 54.7 and 50.5 ms.
+- After Tasks 3.2-3.4, HUD click first: `contextState` `running` before the move; 33.3, 33.4, 33.4 ms. Pass (≤ baseline).
+- The per-frame listener update calls `setListener` directly (it returns early until the context runs) instead of reading `getState()`, so no object is allocated per frame.
+- Each positioned cue gets its own panner, disconnected after 1.5 s.
+- Phase exit: lint, 31 unit tests, e2e 17 passed + 1 pre-existing skip.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.

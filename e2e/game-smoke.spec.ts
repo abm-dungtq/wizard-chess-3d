@@ -146,6 +146,19 @@ test.describe('single-player smoke', () => {
     test.skip(true, 'Engine exposes no world-to-screen helper; pointer picking is covered by unit raycast tests');
   });
 
+  test('audio unlocks on first gesture before the first move', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await openGame(page);
+    expect((await getState(page)).audioState.contextState).toBe('none');
+    // A HUD element, not the canvas: the document-level listener must catch it.
+    await page.click('.brand-pill');
+    await waitForState(page, "s.audioState.contextState === 'running'", 5_000);
+    await page.evaluate(() => (window as any).wizardChess.executeChessMove(6, 4, 4, 4));
+    await waitIdle(page);
+    expect((await getState(page)).audioState.contextState).toBe('running');
+    expect(errors).toEqual([]);
+  });
+
   test('motion level follows reduced-motion and persists', async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await page.emulateMedia({ reducedMotion: 'reduce' });

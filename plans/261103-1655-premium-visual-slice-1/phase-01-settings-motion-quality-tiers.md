@@ -110,6 +110,8 @@ pr: PR A
 
 ## Execution notes
 
+- The tier-downgrade settling window, frame cap and cooldown from the phase-1 checkpoint landed in the phase-2 commit (feat(assets)).
+
 - `src/visualSettings.ts` added; `npx tsc --noEmit` exit 0.
 - Unit tests: 30 pass, 0 fail (29 + 1).
 - Smoke suite: 9 passed, 1 skipped. The skip is the pre-existing `real canvas click selects a piece` (`test.skip` at line 146), so "previous 9 plus 1" means 9 runnable + the skipped one.
