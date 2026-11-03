@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Labels on selection and hover"
-status: pending
+status: completed
 effort: 2h
 pr: PR B
 ---
@@ -79,7 +79,11 @@ pr: PR B
 
 ## Execution notes
 
-(fill in during execution)
+- Default label mode is now `tap` (shown as "Khi Chọn" / "Chọn"); the cycle is `tap → smart → all`. No existing test depended on the old default.
+- Deviation from Task 6.2: the hover raycast targets the piece hitbox proxies plus `getActiveBoardSquareMeshes()`, the same set the click handler uses, instead of squares only. The hitboxes are invisible cylinder proxies (skinned meshes have a no-op `raycast`), so the SkinnedMesh cost the plan worried about cannot occur, and squares-only would pick the tile behind a tall piece when the mouse is on its body.
+- Added `window.wizardChess.getPieceScreenPoint(r, c)` (projects the piece's mid-height) for the e2e hover step; `getState()` exposes `hoveredSquare`.
+- Kongming checkpoint: GO-WITH-FIXES. Applied: the pending pointer position is kept while a move or the kill-cam plays and is raycast once the scene settles; `hoveredSquare` is cleared on reset, snapshot restore and variant switch; a hovered pawn uses the full badge instead of the compact one; pen pointers hover too (only touch is filtered).
+- Verify: `npx playwright test e2e/game-smoke.spec.ts -g "labels show only"` → 1 passed. Phase exit: lint OK, `npm test` 31 pass, `npx playwright test` 21 passed + 1 pre-existing skip; after the kongming fixes `e2e/game-smoke.spec.ts` re-run 14 passed + 1 skip.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.

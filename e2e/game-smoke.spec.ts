@@ -288,4 +288,34 @@ test.describe('single-player smoke', () => {
     await page.evaluate(() => (window as any).wizardChess.setQualityTier('auto'));
     expect(errors).toEqual([]);
   });
+
+  test('labels show only for selection and hover by default', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await page.setViewportSize({ width: 1470, height: 956 });
+    await openGame(page);
+    await page.mouse.move(5, 5);
+    await waitIdle(page);
+    const badges = async () => (await getState(page)).visibleOverheadBadgeCount;
+    expect((await getState(page)).pieceLabelMode).toBe('tap');
+    expect(await badges()).toBe(0);
+
+    await page.evaluate(() => (window as any).wizardChess.inspectSquare(7, 1));
+    expect(await badges()).toBe(1);
+    await page.evaluate(() => (window as any).wizardChess.inspectSquare(-1, -1));
+    expect(await badges()).toBe(0);
+
+    const king = await page.evaluate(() => (window as any).wizardChess.getPieceScreenPoint(7, 4));
+    await page.mouse.move(king.x, king.y);
+    await expect.poll(async () => (await getState(page)).hoveredSquare).toEqual({ r: 7, c: 4 });
+    expect(await badges()).toBe(1);
+
+    await page.mouse.move(5, 5);
+    await expect.poll(badges).toBe(0);
+
+    await page.locator('#btn-piece-labels').evaluate((el: HTMLElement) => el.click());
+    await page.locator('#btn-piece-labels').evaluate((el: HTMLElement) => el.click());
+    expect((await getState(page)).pieceLabelMode).toBe('all');
+    await expect.poll(badges).toBeGreaterThanOrEqual(30);
+    expect(errors).toEqual([]);
+  });
 });

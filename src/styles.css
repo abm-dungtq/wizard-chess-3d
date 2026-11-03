@@ -1611,6 +1611,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
   white-space: nowrap;
   pointer-events: none;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.72);
+  transition: opacity 120ms ease-out;
 }
 
 .piece-overhead-badge.faction-w {

@@ -4859,8 +4859,12 @@ export function initWizardChess() {
     // Steady 3D Combat Camera (disabled zoom-in/out by default to eliminate motion sickness & lag feel)
     let combatCameraZoomEnabled = false;
     // 3-Layer Piece Identification & Readability System ('smart' | 'all' | 'tap')
-    let pieceLabelMode = 'smart';
+    let pieceLabelMode = 'tap';
     let inspectedSquare = null; // { r, c } | null
+    // Piece under a real mouse pointer; the raycast runs at most once per frame, after the pointer moved.
+    let hoveredSquare = null; // { r, c } | null
+    let hoverPending = null; // { x, y } | null
+    const hoverCapable = window.matchMedia?.('(hover: hover) and (pointer: fine)')?.matches === true;
     const overheadBadgeSlots = [];
     const _overheadProjVec = new THREE.Vector3();
 
@@ -4896,12 +4900,12 @@ export function initWizardChess() {
       const modeNames = {
         smart: 'Thông Minh',
         all: 'Tất Cả (32)',
-        tap: 'Khi Chạm'
+        tap: 'Khi Chọn'
       };
       const shortNames = {
         smart: 'Bật',
         all: 'Tất Cả',
-        tap: 'Chạm'
+        tap: 'Chọn'
       };
       const btnLabels = document.getElementById('btn-piece-labels');
       if (btnLabels) {
@@ -4925,7 +4929,7 @@ export function initWizardChess() {
     }
 
     function cyclePieceLabelMode() {
-      const order = ['smart', 'all', 'tap'];
+      const order = ['tap', 'smart', 'all'];
       const idx = order.indexOf(pieceLabelMode);
       const nextMode = order[(idx + 1) % order.length];
       return setPieceLabelMode(nextMode);
@@ -4965,8 +4969,10 @@ export function initWizardChess() {
               )
           );
 
+          const isHovered = Boolean(hoveredSquare && hoveredSquare.r === r && hoveredSquare.c === c);
+
           let shouldShow = false;
-          if (isSelected || isInspected || isCaptureTarget) {
+          if (isSelected || isInspected || isCaptureTarget || isHovered) {
             shouldShow = true;
           } else if (pieceLabelMode === 'all') {
             shouldShow = true;
@@ -5003,8 +5009,18 @@ export function initWizardChess() {
             ? `${p.color === 'w' ? meta.glyphW : meta.glyphB} ${pieceShortVi}`
             : pieceShortVi;
           const cls = `piece-overhead-badge faction-${p.color}${
-            p.type === 'pawn' && !isSelected && !isInspected && !isCaptureTarget ? ' is-pawn-compact' : ''
-          }${isCaptureTarget ? ' is-capture-target' : isSelected ? ' is-selected' : isInspected ? ' is-inspected' : ''}`;
+            p.type === 'pawn' && !isSelected && !isInspected && !isCaptureTarget && !isHovered ? ' is-pawn-compact' : ''
+          }${
+            isCaptureTarget
+              ? ' is-capture-target'
+              : isSelected
+                ? ' is-selected'
+                : isInspected
+                  ? ' is-inspected'
+                  : isHovered
+                    ? ' is-hovered'
+                    : ''
+          }`;
 
           if (slot.lastGlyph !== glyphStr) {
             slot.glyphEl.textContent = glyphStr;
@@ -5233,6 +5249,7 @@ export function initWizardChess() {
       clearSquareHighlights();
       selectedSquare = null;
       inspectedSquare = null;
+      hoveredSquare = null;
       validMoves = [];
       isAnimatingMove = false;
       if (snap.gameVariant === 'xiangqi' || snap.gameVariant === 'chess') {
@@ -5368,6 +5385,7 @@ export function initWizardChess() {
       clearSquareHighlights();
       selectedSquare = null;
       inspectedSquare = null;
+      hoveredSquare = null;
       validMoves = [];
       currentTurn = 'w';
       if (gameMode === 'single' && isPassAndPlay) {
@@ -8933,6 +8951,53 @@ export function initWizardChess() {
       };
     });
 
+    const hoverRayTargets = [];
+
+    function processPendingHover() {
+      // While a move or the kill-cam plays, keep the last pointer position so it is picked once the scene settles.
+      if (!hoverPending || isAnimatingMove || cinematicActive) return;
+      const { x, y } = hoverPending;
+      hoverPending = null;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((x - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((y - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      // Piece hitboxes are cheap cylinder proxies (never the skinned meshes), so hovering a piece's body picks that piece.
+      hoverRayTargets.length = 0;
+      for (let r = 0; r < getBoardRows(); r++) {
+        for (let c = 0; c < getBoardCols(); c++) {
+          const p = boardState[r]?.[c];
+          if (p && p.hitbox) hoverRayTargets.push(p.hitbox);
+        }
+      }
+      for (const sq of getActiveBoardSquareMeshes()) hoverRayTargets.push(sq);
+      const hits = raycaster.intersectObjects(hoverRayTargets, false);
+      const coords = hits.length > 0 ? extractBoardCoordsFromHit(hits[0].object) : null;
+      const next = coords && boardState[coords.r]?.[coords.c] ? { r: coords.r, c: coords.c } : null;
+      if (next?.r !== hoveredSquare?.r || next?.c !== hoveredSquare?.c) {
+        hoveredSquare = next;
+        updatePieceOverheadOverlay();
+      }
+    }
+
+    if (hoverCapable) {
+      renderer.domElement.addEventListener(
+        'pointermove',
+        (e) => {
+          if (e.pointerType === 'touch') return;
+          hoverPending = { x: e.clientX, y: e.clientY };
+        },
+        { passive: true }
+      );
+      renderer.domElement.addEventListener('pointerleave', () => {
+        hoverPending = null;
+        if (hoveredSquare) {
+          hoveredSquare = null;
+          updatePieceOverheadOverlay();
+        }
+      });
+    }
+
     renderer.domElement.addEventListener('pointerup', (e) => {
       const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
       const maxClickDrift = isCameraLocked ? 22 : 6;
@@ -10503,6 +10568,18 @@ export function initWizardChess() {
       setPieceLabelMode,
       cyclePieceLabelMode,
       getPieceLabelMode: () => pieceLabelMode,
+      getPieceScreenPoint: (r, c) => {
+        const p = boardState[r]?.[c];
+        if (!p || !p.mesh) return null;
+        const rect = renderer.domElement.getBoundingClientRect();
+        const roleScale = ROLE_SCALE_MULTIPLIERS[p.type] || 1.0;
+        const midY = p.mesh.position.y + (PIECE_HEIGHTS[p.type] || 0.38) * roleScale * 0.5;
+        const v = new THREE.Vector3(p.mesh.position.x, midY, p.mesh.position.z).project(camera);
+        return {
+          x: rect.left + (v.x + 1) * 0.5 * rect.width,
+          y: rect.top + (-v.y + 1) * 0.5 * rect.height
+        };
+      },
       inspectSquare: (r, c) => {
         if (
           typeof r !== 'number' ||
@@ -10811,6 +10888,7 @@ export function initWizardChess() {
         pieceLabelMode,
         inspectedSquare,
         visibleOverheadBadgeCount: overheadBadgeSlots.filter((s) => s.visible).length,
+        hoveredSquare: hoveredSquare ? { ...hoveredSquare } : null,
         inspectCardVisible: Boolean(
           document.getElementById('piece-inspect-card')?.classList.contains('visible')
         ),
@@ -11317,6 +11395,7 @@ export function initWizardChess() {
       }
 
       if (doRender && !isWebGLContextLost) {
+        processPendingHover();
         renderFrame(dt);
         updatePieceOverheadOverlay();
       }
