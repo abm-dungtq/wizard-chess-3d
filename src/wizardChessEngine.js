@@ -5,6 +5,13 @@ import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import {
   extractPureBoard,
   getPureLegalMovesForPiece,
@@ -266,7 +273,86 @@ export function initWizardChess() {
       renderer.setSize(window.innerWidth, window.innerHeight);
       if (postComposer) resizePostComposer();
     }
-    function resizePostComposer() {}
+    let postPasses = { gtao: null, bokeh: null, bloom: null };
+    let builtTier = null;
+    function resizePostComposer() {
+      if (!postComposer) return;
+      postComposer.setPixelRatio(currentActiveDpr);
+      postComposer.setSize(window.innerWidth, window.innerHeight);
+      // The composer resizes every pass to full size, so GTAO is halved afterwards.
+      if (postPasses.gtao) {
+        const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+        postPasses.gtao.setSize(Math.ceil(size.x / 2), Math.ceil(size.y / 2));
+      }
+    }
+    function disposePostComposer() {
+      if (!postComposer) return;
+      for (const pass of postComposer.passes) pass.dispose?.();
+      if (typeof postComposer.dispose === 'function') {
+        postComposer.dispose();
+      } else {
+        postComposer.renderTarget1.dispose();
+        postComposer.renderTarget2.dispose();
+      }
+      postComposer = null;
+      postPasses = { gtao: null, bokeh: null, bloom: null };
+    }
+    // GTAO and Bokeh redraw the scene with depth/normal override materials, which turns flames, particles and
+    // glass into solid shapes and paints dark AO silhouettes behind them. Those passes skip see-through objects.
+    // The scan runs per frame because attack effects add and remove see-through meshes at any time.
+    const isSeeThrough = (m) => m.transparent || m.depthWrite === false;
+    const hiddenForDepth = [];
+    function skipSeeThroughObjects(pass) {
+      const render = pass.render.bind(pass);
+      pass.render = (...args) => {
+        scene.traverseVisible((o) => {
+          const m = o.material;
+          if (m && (Array.isArray(m) ? m.some(isSeeThrough) : isSeeThrough(m))) hiddenForDepth.push(o);
+        });
+        for (const o of hiddenForDepth) o.visible = false;
+        try {
+          render(...args);
+        } finally {
+          for (const o of hiddenForDepth) o.visible = true;
+          hiddenForDepth.length = 0;
+        }
+      };
+      return pass;
+    }
+    /** ultra: AO + depth of field (off until the kill-cam) + bloom; high: bloom; base: plain render. */
+    function buildPostComposer(tier) {
+      disposePostComposer();
+      builtTier = tier;
+      if (tier === 'base' || isWebGLContextLost) return;
+      const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+      const halfFloatOk =
+        renderer.capabilities.isWebGL2 &&
+        Boolean(renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float'));
+      // Composer targets ignore the canvas antialias flag. SMAA smooths edges instead of MSAA on the target:
+      // multisampled float targets cost ~10 ms a frame on ANGLE Metal at DPR 1.35.
+      const rt = new THREE.WebGLRenderTarget(size.x, size.y, {
+        type: halfFloatOk ? THREE.HalfFloatType : THREE.UnsignedByteType
+      });
+      postComposer = new EffectComposer(renderer, rt);
+      postComposer.addPass(new RenderPass(scene, camera));
+      if (tier === 'ultra') {
+        const gtao = skipSeeThroughObjects(new GTAOPass(scene, camera, size.x, size.y));
+        gtao.blendIntensity = 0.85;
+        gtao.updateGtaoMaterial({ radius: 0.25, distanceExponent: 1, thickness: 1, scale: 1, samples: 8 });
+        postComposer.addPass(gtao);
+        postPasses.gtao = gtao;
+        const bokeh = skipSeeThroughObjects(new BokehPass(scene, camera, { focus: 6, aperture: 0.0025, maxblur: 0.008 }));
+        bokeh.enabled = false;
+        postComposer.addPass(bokeh);
+        postPasses.bokeh = bokeh;
+      }
+      const bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.45, 0.88);
+      postComposer.addPass(bloom);
+      postPasses.bloom = bloom;
+      postComposer.addPass(new SMAAPass(size.x, size.y));
+      postComposer.addPass(new OutputPass());
+      resizePostComposer();
+    }
 
     // Motion level and quality tier: saved choices win over the OS setting and device detection.
     function readGpuRendererString() {
@@ -339,6 +425,7 @@ export function initWizardChess() {
       (e) => {
         e.preventDefault();
         isWebGLContextLost = true;
+        disposePostComposer();
       },
       false
     );
@@ -358,6 +445,7 @@ export function initWizardChess() {
           }
         });
         renderer.shadowMap.needsUpdate = true;
+        buildPostComposer(qualityTier);
         renderFrame();
       },
       false
@@ -404,6 +492,13 @@ export function initWizardChess() {
 
     const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.22, 65);
     camera.position.set(0, 7.35, 3.95);
+
+    // The settings event only fires on changes, so the first build reads the tier directly.
+    buildPostComposer(qualityTier);
+    window.addEventListener('wizardchess:visual-settings', (e) => {
+      if (e.detail.qualityTier === builtTier) return;
+      buildPostComposer(e.detail.qualityTier);
+    });
 
     function getPortraitFramingFactor() {
       const w = Math.max(1, window.innerWidth || 1280);
@@ -10518,6 +10613,12 @@ export function initWizardChess() {
           programs: renderer.info?.programs ? renderer.info.programs.length : 0
         },
         audioState: wizardAudio.getState(),
+        postFx: {
+          active: Boolean(postComposer),
+          gtao: Boolean(postPasses.gtao),
+          bloom: Boolean(postPasses.bloom),
+          dof: Boolean(postPasses.bokeh?.enabled)
+        },
         motionLevel,
         qualityTier,
         qualityTierSource,
@@ -11102,6 +11203,7 @@ export function initWizardChess() {
         window.innerWidth <= 768 || coarsePointerQuery?.matches
       );
       trackSlowFramesForTier(frameMs, currentActiveDpr <= (isMobileNow ? 1.35 : 1.0));
+      if (dprFrozen) return currentActiveDpr;
       if (isMobileNow) {
         const targetMobileRetinaDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 2.0);
         if (rollingFrameMs > 28.0) {
@@ -11184,11 +11286,50 @@ export function initWizardChess() {
       announceVisualSettings();
     }
 
+    // Test-only frame recorder: real deltas between frames into a fixed buffer, no per-frame allocation.
+    const frameRecorder = new Float32Array(4096);
+    let frameRecorderCount = -1;
+    let frameRecorderLast = 0;
+    let dprFrozen = false;
+    window.wizardChess.startFrameRecorder = () => {
+      frameRecorderCount = 0;
+      frameRecorderLast = performance.now();
+    };
+    window.wizardChess.stopFrameRecorder = () => {
+      const count = Math.max(0, frameRecorderCount);
+      frameRecorderCount = -1;
+      const sorted = Array.from(frameRecorder.subarray(0, count)).sort((a, b) => a - b);
+      const at = (q) => (count ? Number(sorted[Math.min(count - 1, Math.floor(count * q))].toFixed(2)) : 0);
+      const mean = count ? sorted.reduce((n, v) => n + v, 0) / count : 0;
+      return {
+        count,
+        mean: Number(mean.toFixed(2)),
+        p50: at(0.5),
+        p95: at(0.95),
+        max: count ? Number(sorted[count - 1].toFixed(2)) : 0,
+        over33: sorted.filter((v) => v > 33).length
+      };
+    };
+    /** Holds the adaptive DPR still (optionally at a given value) so perf runs measure a fixed pixel count. */
+    window.wizardChess.freezeDpr = (on, dpr) => {
+      dprFrozen = Boolean(on);
+      if (dprFrozen && Number.isFinite(dpr)) {
+        currentActiveDpr = dpr;
+        applyRendererSize();
+      }
+      return currentActiveDpr;
+    };
+
     function animate() {
       rafPending = false;
       if (manualStepMode) return;
       rafPending = true;
       requestAnimationFrame(animate);
+      if (frameRecorderCount >= 0 && frameRecorderCount < frameRecorder.length) {
+        const now = performance.now();
+        frameRecorder[frameRecorderCount++] = now - frameRecorderLast;
+        frameRecorderLast = now;
+      }
       const rawDelta = clock.getDelta();
       if (rawDelta > 0.001 && rawDelta < 1.0) {
         feedFrameTimeSample(rawDelta * 1000);

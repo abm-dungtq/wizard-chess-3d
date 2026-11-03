@@ -162,6 +162,29 @@ test.describe('single-player smoke', () => {
     expect(errors).toEqual([]);
   });
 
+  test('post-processing follows the quality tier', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await openGame(page);
+    const s = await getState(page);
+    expect(s.qualityTier).toBe('high');
+    expect(s.postFx).toEqual({ active: true, gtao: false, bloom: true, dof: false });
+
+    await page.evaluate(() => (window as any).wizardChess.setQualityTier('ultra'));
+    await waitIdle(page);
+    expect((await getState(page)).postFx.gtao).toBe(true);
+    // A black or blank canvas compresses far below this.
+    expect((await page.locator('canvas').first().screenshot()).length).toBeGreaterThan(20_000);
+
+    await page.evaluate(() => (window as any).wizardChess.setQualityTier('base'));
+    expect((await getState(page)).postFx.active).toBe(false);
+    expect((await page.locator('canvas').first().screenshot()).length).toBeGreaterThan(20_000);
+
+    await page.evaluate(() => (window as any).wizardChess.executeChessMove(6, 4, 4, 4));
+    await waitIdle(page);
+    await page.evaluate(() => (window as any).wizardChess.setQualityTier('auto'));
+    expect(errors).toEqual([]);
+  });
+
   test('motion level follows reduced-motion and persists', async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await page.emulateMedia({ reducedMotion: 'reduce' });

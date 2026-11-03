@@ -124,7 +124,30 @@ pr: PR B
 
 ## Execution notes
 
-(fill in during execution)
+- Tasks 4.1-4.4 done (uncommitted at time of writing): one `renderFrame()`/`applyRendererSize()`, tiered composer, `postFx` in `getState()`, e2e 'post-processing follows the quality tier' passes.
+- Task 4.5: `base` parity 0.03% differing pixels (442/1,405,320); same-code noise floor 0.02%. Pass. Images in `visuals/base-before.png`, `visuals/base-after.png`.
+- Task 4.6 failed its pass condition. Prescribed fallback applied: GTAO samples 8 (ultra 15.24 ms), then radius 0.25 (13.76, 14.14 ms), all at an adaptive DPR that had fallen to 1.0. Failure Protocol: kongming said the run was optimistic (DPR 1.0, not the 1.35 desktop cap) and asked for a frozen-DPR ablation. `freezeDpr` and the frame recorder from phase 8 Task 8.1 were pulled forward for this.
+- Ablation, Apple M4, headed Chromium, ANGLE Metal, vsync uncapped, 1470x956, idle scene, 6 s recorded per run, two runs each (mean ms):
+
+  | Config @ DPR 1.35 | mean | p50 |
+  |---|---|---|
+  | ultra as specified (MSAA 4, HalfFloat) | 20.6-24.1 | 19-23 |
+  | ultra, GTAO off | 14.3 | 13.5 |
+  | ultra, MSAA 2 | 18.7 | 19.6 |
+  | ultra, UnsignedByte target | 16.7 | 14.7 |
+  | ultra, bloom off | 17.5 | 15.4 |
+  | **ultra, MSAA 0 + SMAA** | **12.1** | 10-14 |
+  | ultra, MSAA 0 + FXAA | 10.7 | 10.7 |
+  | ultra, MSAA 0, no AA | 11.7 | 10.3 |
+  | high as specified | 12.2-12.7 | 12.7 |
+  | **high, MSAA 0 + SMAA** | **8.6** | 7.6 |
+  | base | 6.3 | 5.1 |
+
+  At DPR 1.0: ultra 13.6, high 8.3, base 5.0. MSAA on the half-float composer target is the largest single cost on ANGLE Metal, larger than GTAO. Uncapped p95 is about twice the mean because frames are released in clumps without vsync, so stutter has to be judged in a vsync-on run.
+- User chose SMAA. The composer target has no MSAA; an `SMAAPass` runs before `OutputPass` on high and ultra.
+- Task 4.7: on ultra the brazier flame drew as a solid dark AO silhouette on the wall; absent on high. Step 2 applied: GTAO and Bokeh skip see-through meshes (`transparent` or `depthWrite === false`) during their own render. The list is scanned each frame, not cached, because attack effects add see-through meshes at any time. After the fix ultra matches high at the flames and at the relic crystals. Images: `visuals/gtao-flames-{ultra,high}.png`, `visuals/gtao-crystals-{ultra,high}.png` (flame-ultra is the post-fix frame).
+- Re-measured with SMAA and the see-through skip, DPR frozen at 1.35, same harness, while the machine was under heavy unrelated load (load average 43-53): ultra 13.1-13.5 ms, high 10.0 ms, base 6.5-7.2 ms. Base was 6.3 ms in the quiet ablation, so the load adds about 5-13%. Scaled by the ultra/base ratio (about 2.0), ultra is about 12.6 ms on a quiet machine: still slightly above the 12 ms target. Reported at the checkpoint.
+- Phase exit check: lint OK, unit 31 pass, e2e 18 pass + 1 pre-existing skip.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.
