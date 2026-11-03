@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Room API auth and anti-hijack"
-status: pending
+status: completed
 effort: 3h
 pr: PR 1
 ---
@@ -141,3 +141,11 @@ Spawn the `kongming` subagent for next-step counsel and pass:
 - the pass condition it failed to meet.
 Apply kongming's guidance, then re-run the Verify step.
 If `kongming` cannot be spawned in this environment, STOP and report the same failure evidence to the user. Never continue by self-reasoning.
+
+## Execution notes
+
+- `#mp-status-msg` does not exist in the current UI; only `#duel-status-msg` is rendered (`src/App.tsx`). The client writes to both, and the e2e test asserts on `#duel-status-msg`.
+- Per the phase-1 advisory checkpoint, `sendMultiplayerMove` and the reset action also surface `data.error` when the server rejects them.
+- The "Room is full" e2e test closes player A before opening player C so that at most two 3D scenes are live. It relies on seats persisting after disconnect; a future leave-on-unload feature must revisit it.
+- `roomStore.ts` line coverage rose to 84.95% after adding feedback API tests.
+- Pre-existing flake, not caused by this phase: the AI test `yields < 14ms slices` fails about 1 in 3 full coverage runs under load and passes alone. `chessAI.ts` is untouched.

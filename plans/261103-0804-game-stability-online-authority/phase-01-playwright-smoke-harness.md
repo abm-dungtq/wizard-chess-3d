@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Playwright smoke harness"
-status: pending
+status: completed
 effort: 3h
 pr: PR 1
 ---
@@ -151,3 +151,9 @@ Apply kongming's guidance, then re-run the Verify step.
 If `kongming` cannot be spawned in this environment, STOP and report the same failure evidence to the user. Never continue by self-reasoning.
 
 A test that fails on the **unmodified** engine is a real finding. Do not weaken the assertion and do not fix the engine in this phase. Report it through the Failure Protocol.
+
+## Execution notes
+
+- The real canvas-click test is skipped: the engine has no world-to-screen helper, so pointer picking stays covered by unit raycast tests.
+- Baseline on the unmodified engine: 6 passed, 1 skipped.
+- `openPlayer` must close its browser contexts after each test (added in phase 2). Leftover 3D scenes from one test starved the next test's page load and caused 90 s timeouts.

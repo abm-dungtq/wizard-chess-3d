@@ -37,6 +37,17 @@ interface InternalRoomEntry extends PublicRoomState {
 
 const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const MAX_ROOM_MOVES = 600;
+const CLIENT_TOKEN_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+const SKIN_ID_PATTERN = /^[a-z0-9_]{1,40}$/;
+
+export function generateRoomCode(): string {
+  const bytes = new Uint8Array(4);
+  crypto.getRandomValues(bytes);
+  let code = '';
+  for (const b of bytes) code += ROOM_CODE_CHARS[b % ROOM_CODE_CHARS.length];
+  return code;
+}
 
 function normalizePromotion(raw?: string): PromotionPieceType {
   if (raw === 'rook' || raw === 'bishop' || raw === 'knight' || raw === 'queen') {
@@ -102,10 +113,7 @@ export class RoomStore {
 
   private generateUniqueCode(): string {
     for (let attempt = 0; attempt < 32; attempt++) {
-      let code = '';
-      for (let i = 0; i < 4; i++) {
-        code += ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)];
-      }
+      const code = generateRoomCode();
       if (!this.rooms.has(code)) return code;
     }
     return 'W' + Date.now().toString(36).slice(-3).toUpperCase();
@@ -113,8 +121,16 @@ export class RoomStore {
 
   private ensureToken(rawToken?: string): string {
     const trimmed = String(rawToken || '').trim();
-    if (trimmed) return trimmed;
-    return 'tok_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+    if (CLIENT_TOKEN_PATTERN.test(trimmed)) return trimmed;
+    return crypto.randomUUID();
+  }
+
+  private seatForToken(entry: InternalRoomEntry, rawToken?: string): 'w' | 'b' | null {
+    const token = String(rawToken || '').trim();
+    if (!token) return null;
+    if (entry.whiteToken === token) return 'w';
+    if (entry.blackToken === token) return 'b';
+    return null;
   }
 
   private broadcast(entry: InternalRoomEntry): void {
@@ -139,8 +155,17 @@ export class RoomStore {
     const cleanedExplicit = String(explicitCode || '').trim().toUpperCase();
     const code = cleanedExplicit || this.generateUniqueCode();
     const token = this.ensureToken(playerToken);
+    const existing = this.rooms.get(code);
+    if (existing) {
+      const seat = this.seatForToken(existing, token);
+      if (!seat) {
+        return { ok: false as const, error: 'Room code already in use' };
+      }
+      return { ok: true as const, code, color: seat, playerToken: token, room: toPublicRoom(existing) };
+    }
     const side: 'w' | 'b' = preferredColor === 'b' ? 'b' : 'w';
-    const skin = String(skinId || '').trim() || 'hogwarts';
+    const requestedSkin = String(skinId || '').trim();
+    const skin = SKIN_ID_PATTERN.test(requestedSkin) ? requestedSkin : 'hogwarts';
     const variant = normalizeGameVariant(gameVariant);
     const now = Date.now();
 
@@ -178,7 +203,8 @@ export class RoomStore {
       return { ok: false as const, error: 'Room code is required' };
     }
     const token = this.ensureToken(playerToken);
-    const skin = String(skinId || '').trim();
+    const requestedSkin = String(skinId || '').trim();
+    const skin = SKIN_ID_PATTERN.test(requestedSkin) ? requestedSkin : '';
     const now = Date.now();
     let entry = this.rooms.get(code);
     let assignedColor: 'w' | 'b' = 'w';
@@ -203,7 +229,7 @@ export class RoomStore {
       };
       this.rooms.set(code, entry);
     } else {
-      if (gameVariant === 'xiangqi' || gameVariant === 'chess') {
+      if ((gameVariant === 'xiangqi' || gameVariant === 'chess') && entry.moves.length === 0) {
         entry.gameVariant = gameVariant;
       }
       if (entry.whiteToken === token) {
@@ -221,7 +247,7 @@ export class RoomStore {
         entry.blackToken = token;
         assignedColor = 'b';
       } else {
-        assignedColor = 'b';
+        return { ok: false as const, error: 'Room is full' };
       }
       if (skin) {
         if (assignedColor === 'w') entry.whiteSkin = skin;
@@ -241,14 +267,21 @@ export class RoomStore {
     };
   }
 
-  setPlayerSkin(codeInput: string, payload: { color?: string; skinId?: string }) {
+  setPlayerSkin(codeInput: string, payload: { skinId?: string; playerToken?: string }) {
     const code = String(codeInput || '').trim().toUpperCase();
     const entry = this.rooms.get(code);
     if (!entry) {
       return { ok: false as const, error: 'Room not found' };
     }
-    const skin = String(payload.skinId || '').trim() || 'hogwarts';
-    if (payload.color === 'b') {
+    const seat = this.seatForToken(entry, payload.playerToken);
+    if (!seat) {
+      return { ok: false as const, error: 'Unauthorized player token' };
+    }
+    const skin = String(payload.skinId || '').trim();
+    if (!SKIN_ID_PATTERN.test(skin)) {
+      return { ok: false as const, error: 'Invalid skin id' };
+    }
+    if (seat === 'b') {
       entry.blackSkin = skin;
     } else {
       entry.whiteSkin = skin;
@@ -290,42 +323,21 @@ export class RoomStore {
     if (!entry) {
       return { ok: false as const, error: 'Room not found' };
     }
-    if (payload.gameVariant === 'xiangqi' || payload.gameVariant === 'chess') {
-      entry.gameVariant = payload.gameVariant;
+    const seat = this.seatForToken(entry, payload.playerToken);
+    if (!seat) {
+      return { ok: false as const, error: 'Unauthorized player token', room: toPublicRoom(entry) };
     }
-    // Support both 8x8 Chess and 10x9 Xiangqi coordinates
-    const effectiveVariant: GameVariant =
-      entry.gameVariant === 'xiangqi' ||
-      payload.gameVariant === 'xiangqi' ||
-      ((payload.from as RoomCoord | undefined)?.r ?? 0) >= 8 ||
-      ((payload.from as RoomCoord | undefined)?.c ?? 0) >= 8 ||
-      ((payload.to as RoomCoord | undefined)?.r ?? 0) >= 8 ||
-      ((payload.to as RoomCoord | undefined)?.c ?? 0) >= 8
-        ? 'xiangqi'
-        : 'chess';
-    if (!isValidCoord(payload.from, effectiveVariant) || !isValidCoord(payload.to, effectiveVariant)) {
+    const variant: GameVariant = entry.gameVariant || 'chess';
+    if (!isValidCoord(payload.from, variant) || !isValidCoord(payload.to, variant)) {
       return { ok: false as const, error: 'Invalid move coordinates', room: toPublicRoom(entry) };
     }
-    if (effectiveVariant === 'xiangqi') {
-      entry.gameVariant = 'xiangqi';
-    }
-    const moveColor: 'w' | 'b' = payload.color === 'b' ? 'b' : 'w';
-    if (moveColor !== entry.turn) {
+    if (seat !== entry.turn) {
       return { ok: false as const, error: 'Not your turn', room: toPublicRoom(entry) };
     }
-
-    const token = String(payload.playerToken || '').trim();
-    if (moveColor === 'w') {
-      if (entry.whiteToken && token && entry.whiteToken !== token) {
-        return { ok: false as const, error: 'Unauthorized White player token', room: toPublicRoom(entry) };
-      }
-      if (!entry.whiteToken && token) entry.whiteToken = token;
-    } else {
-      if (entry.blackToken && token && entry.blackToken !== token) {
-        return { ok: false as const, error: 'Unauthorized Black player token', room: toPublicRoom(entry) };
-      }
-      if (!entry.blackToken && token) entry.blackToken = token;
+    if (entry.moves.length >= MAX_ROOM_MOVES) {
+      return { ok: false as const, error: 'Move limit reached', room: toPublicRoom(entry) };
     }
+    const moveColor = seat;
 
     const move: RoomMove = {
       seq: entry.moves.length + 1,
@@ -348,11 +360,14 @@ export class RoomStore {
     };
   }
 
-  resetRoom(codeInput: string, gameVariant?: string) {
+  resetRoom(codeInput: string, gameVariant?: string, playerToken?: string) {
     const code = String(codeInput || '').trim().toUpperCase();
     const entry = this.rooms.get(code);
     if (!entry) {
       return { ok: false as const, error: 'Room not found' };
+    }
+    if (!this.seatForToken(entry, playerToken)) {
+      return { ok: false as const, error: 'Unauthorized player token' };
     }
     if (gameVariant === 'xiangqi' || gameVariant === 'chess') {
       entry.gameVariant = gameVariant;
@@ -390,6 +405,17 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type'
 };
+
+function statusForError(error: string): number {
+  if (error === 'Room not found') return 404;
+  if (error === 'Unauthorized player token') return 403;
+  if (error === 'Room code already in use' || error === 'Room is full') return 409;
+  return 400;
+}
+
+function resultResponse(result: { ok: boolean; error?: string }): Response {
+  return jsonResponse(result, result.ok ? 200 : statusForError(result.error || ''));
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -438,7 +464,7 @@ export async function handleRoomApiRequest(
       typeof body.skinId === 'string' ? body.skinId : undefined,
       typeof body.gameVariant === 'string' ? body.gameVariant : undefined
     );
-    return jsonResponse(result, 200);
+    return resultResponse(result);
   }
 
   if (pathname === '/api/rooms/join' && request.method === 'POST') {
@@ -449,7 +475,7 @@ export async function handleRoomApiRequest(
       typeof body.skinId === 'string' ? body.skinId : undefined,
       typeof body.gameVariant === 'string' ? body.gameVariant : undefined
     );
-    return jsonResponse(result, result.ok ? 200 : result.error === 'Room not found' ? 404 : 400);
+    return resultResponse(result);
   }
 
   const match = pathname.match(/^\/api\/rooms\/([A-Za-z0-9_-]+)\/(state|move|reset|skin|events)$/);
@@ -463,10 +489,10 @@ export async function handleRoomApiRequest(
   if (action === 'skin' && request.method === 'POST') {
     const body = await readJsonBody(request);
     const result = store.setPlayerSkin(code, {
-      color: typeof body.color === 'string' ? body.color : undefined,
-      skinId: typeof body.skinId === 'string' ? body.skinId : undefined
+      skinId: typeof body.skinId === 'string' ? body.skinId : undefined,
+      playerToken: typeof body.playerToken === 'string' ? body.playerToken : undefined
     });
-    return jsonResponse(result, result.ok ? 200 : 404);
+    return resultResponse(result);
   }
 
   if (action === 'state' && request.method === 'GET') {
@@ -484,16 +510,17 @@ export async function handleRoomApiRequest(
       promotion: typeof body.promotion === 'string' ? body.promotion : undefined,
       gameVariant: typeof body.gameVariant === 'string' ? body.gameVariant : undefined
     });
-    return jsonResponse(result, result.ok ? 200 : result.error === 'Room not found' ? 404 : 400);
+    return resultResponse(result);
   }
 
   if (action === 'reset' && request.method === 'POST') {
     const body = await readJsonBody(request);
     const result = store.resetRoom(
       code,
-      typeof body.gameVariant === 'string' ? body.gameVariant : undefined
+      typeof body.gameVariant === 'string' ? body.gameVariant : undefined,
+      typeof body.playerToken === 'string' ? body.playerToken : undefined
     );
-    return jsonResponse(result, result.ok ? 200 : 404);
+    return resultResponse(result);
   }
 
   if (action === 'events' && request.method === 'GET') {

@@ -8851,7 +8851,10 @@ export function initWizardChess() {
 
     function ensurePlayerToken() {
       if (!playerToken) {
-        playerToken = 'tok_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+        playerToken =
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : 'tok_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
         saveStoredPlayerToken(playerToken);
       }
       return playerToken;
@@ -8864,15 +8867,21 @@ export function initWizardChess() {
       for (const base of bases) {
         try {
           const res = await fetch(`${base}${apiPath}`, options);
-          if (res.ok) {
-            const ct = res.headers.get('content-type') || '';
-            if (ct.includes('application/json')) {
-              return await res.json();
-            }
+          const ct = res.headers.get('content-type') || '';
+          // Any JSON answer (including 4xx rejections) comes from a live room server.
+          if (ct.includes('application/json')) {
+            return await res.json();
           }
         } catch (e) {}
       }
       return null;
+    }
+
+    function showRoomApiError(message) {
+      const mpMsg = document.getElementById('mp-status-msg');
+      if (mpMsg) mpMsg.textContent = message;
+      const duelStatusEl = document.getElementById('duel-status-msg');
+      if (duelStatusEl) duelStatusEl.textContent = `Máy chủ phòng từ chối: ${message}`;
     }
 
     async function sendMultiplayerMove(movePayload) {
@@ -8894,11 +8903,14 @@ export function initWizardChess() {
         saveAndBroadcastStaticRoom(stRoom);
       }
       // 2. Also broadcast to cloud/local room API if reachable
-      await mpApiRequest(`/api/rooms/${roomCode}/move`, {
+      const data = await mpApiRequest(`/api/rooms/${roomCode}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(movePayload)
       });
+      if (data && !data.ok) {
+        showRoomApiError(data.error || 'Move rejected');
+      }
     }
 
     function stopMultiplayerSync() {
@@ -9057,8 +9069,13 @@ export function initWizardChess() {
         })
       });
 
+      if (data && !data.ok) {
+        showRoomApiError(data.error || 'Could not create room');
+        return false;
+      }
+
       // Pure static fallback if neither local nor remote server is reachable
-      if (!data || !data.ok) {
+      if (!data) {
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         let genCode = '';
         for (let i = 0; i < 4; i++) {
@@ -9152,7 +9169,12 @@ export function initWizardChess() {
         body: JSON.stringify({ code, playerToken, skinId: currentPieceThemeId })
       });
 
-      if (!data || !data.ok) {
+      if (data && !data.ok) {
+        showRoomApiError(data.error || 'Could not join room');
+        return false;
+      }
+
+      if (!data) {
         let stRoom = getStaticRoom(code);
         let assignedColor = 'b';
         if (!stRoom) {
@@ -9571,7 +9593,14 @@ export function initWizardChess() {
           saveAndBroadcastStaticRoom(stRoom);
           applyRemoteRoomState(stRoom);
         }
-        await mpApiRequest(`/api/rooms/${roomCode}/reset`, { method: 'POST' });
+        const resetData = await mpApiRequest(`/api/rooms/${roomCode}/reset`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerToken })
+        });
+        if (resetData && !resetData.ok) {
+          showRoomApiError(resetData.error || 'Reset rejected');
+        }
       } else {
         resetChessBoard(true, false);
       }
@@ -9801,7 +9830,8 @@ export function initWizardChess() {
       }
       await mpApiRequest(`/api/rooms/${roomCode}/skin`, {
         method: 'POST',
-        body: JSON.stringify({ color: side, skinId })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerToken, color: side, skinId })
       });
     }
 
