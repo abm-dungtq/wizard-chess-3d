@@ -434,6 +434,24 @@ export default function App() {
           </button>
           <button
             className="hud-btn"
+            id="btn-motion-level"
+            type="button"
+            aria-label="Motion level"
+            title="Hoạt cảnh: Đầy Đủ / Nhanh / Tắt (mặc định theo cài đặt Giảm chuyển động của máy)"
+          >
+            <span id="motion-level-label">🎬 Hoạt Cảnh: Đầy Đủ</span>
+          </button>
+          <button
+            className="hud-btn"
+            id="btn-quality-tier"
+            type="button"
+            aria-label="Quality tier"
+            title="Chất lượng hình ảnh: Tự Động / Ultra / High / Base"
+          >
+            <span id="quality-tier-label">✨ Chất Lượng: Tự Động</span>
+          </button>
+          <button
+            className="hud-btn"
             id="btn-hide-ui"
             title="Ẩn thanh điều khiển (Phím tắt: H)"
             onClick={() => setMobileSheetOpen(false)}

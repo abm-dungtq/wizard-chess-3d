@@ -145,4 +145,35 @@ test.describe('single-player smoke', () => {
   test('real canvas click selects a piece', async () => {
     test.skip(true, 'Engine exposes no world-to-screen helper; pointer picking is covered by unit raycast tests');
   });
+
+  test('motion level follows reduced-motion and persists', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.addInitScript(() => {
+      if (!sessionStorage.getItem('settings-cleared')) {
+        localStorage.removeItem('wizard_chess_settings_v1');
+        sessionStorage.setItem('settings-cleared', '1');
+      }
+    });
+    await openGame(page);
+    expect((await getState(page)).motionLevel).toBe('off');
+
+    await page.evaluate(() => (document.getElementById('btn-motion-level') as HTMLButtonElement).click());
+    expect((await getState(page)).motionLevel).toBe('full');
+    await page.reload();
+    await openGame(page);
+    expect((await getState(page)).motionLevel).toBe('full');
+    expect((await getState(page)).qualityTier).toBe('high');
+
+    for (let i = 0; i < 4 && (await getState(page)).qualityPreference !== 'base'; i++) {
+      await page.evaluate(() => (document.getElementById('btn-quality-tier') as HTMLButtonElement).click());
+    }
+    expect((await getState(page)).qualityTier).toBe('base');
+    await expect(page.locator('#quality-tier-label')).toHaveText(/Base/);
+    await page.reload();
+    await openGame(page);
+    expect((await getState(page)).qualityTier).toBe('base');
+    await page.evaluate(() => localStorage.removeItem('wizard_chess_settings_v1'));
+    expect(errors).toEqual([]);
+  });
 });

@@ -1,7 +1,7 @@
 ---
 phase: 1
 title: "Settings store, Motion setting, quality tiers"
-status: pending
+status: completed
 effort: 3h
 pr: PR A
 ---
@@ -107,6 +107,15 @@ pr: PR A
 ## Phase exit check
 
 - **Verify:** `npm run lint && npm test && npx playwright test e2e/game-smoke.spec.ts 2>&1 | tail -5` exits 0 and shows all smoke tests passed (previous 9 plus 1).
+
+## Execution notes
+
+- `src/visualSettings.ts` added; `npx tsc --noEmit` exit 0.
+- Unit tests: 30 pass, 0 fail (29 + 1).
+- Smoke suite: 9 passed, 1 skipped. The skip is the pre-existing `real canvas click selects a piece` (`test.skip` at line 146), so "previous 9 plus 1" means 9 runnable + the skipped one.
+- Tier pick uses `coarsePointerQuery.matches`, `navigator.maxTouchPoints` and the unmasked WebGL renderer string (exposed as `getState().gpuRenderer`). `qualityPreference` is also exposed.
+- The downgrade check runs inside `feedFrameTimeSample` via `trackSlowFramesForTier`; DPR floor is 1.0 on desktop and 1.35 on mobile (the values that function already drops to).
+- Both new buttons sit in `#hud-right` with the same `grid-column: span 3` as the audio button.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.

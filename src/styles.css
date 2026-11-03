@@ -814,6 +814,8 @@ body.cinematic-ui-hidden #piece-inspect-card {
 #btn-cam-side,
 #btn-cam-wide,
 #btn-audio-toggle,
+#btn-motion-level,
+#btn-quality-tier,
 #btn-hide-ui {
   grid-column: span 3;
 }

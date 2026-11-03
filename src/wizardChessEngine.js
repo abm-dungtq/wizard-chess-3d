@@ -27,6 +27,13 @@ import {
 } from './xiangqiAI.ts';
 import { wizardAudio } from './soundEngine.ts';
 import { runTweens } from './tweenRunner.ts';
+import {
+  downgradeTier,
+  loadVisualSettings,
+  pickQualityTier,
+  resolveMotionLevel,
+  saveVisualSettings
+} from './visualSettings.ts';
 
 /** @type {any} */
 const THREE = THREE_NS;
@@ -244,6 +251,65 @@ export function initWizardChess() {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.24;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    // Motion level and quality tier: saved choices win over the OS setting and device detection.
+    function readGpuRendererString() {
+      try {
+        const gl = renderer.getContext();
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        return String((ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)) || '');
+      } catch {
+        return '';
+      }
+    }
+    const gpuRendererString = readGpuRendererString();
+    const detectQualityTier = () =>
+      pickQualityTier({
+        // Not isCoarseOrMobile: a narrow desktop window must not be locked into the base tier.
+        coarsePointer: Boolean(coarsePointerQuery?.matches),
+        maxTouchPoints: navigator.maxTouchPoints || 0,
+        gpuRenderer: gpuRendererString,
+        isAutomatedTest
+      });
+    const reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    let visualSettings = loadVisualSettings();
+    let motionLevel = resolveMotionLevel(visualSettings.motion, Boolean(reducedMotionQuery?.matches));
+    let qualityPreference = visualSettings.quality || 'auto';
+    let qualityTier = qualityPreference === 'auto' ? detectQualityTier() : qualityPreference;
+    let qualityTierSource = qualityPreference === 'auto' ? 'auto' : 'saved';
+    let slowFrameSeconds = 0;
+
+    function announceVisualSettings() {
+      window.dispatchEvent(
+        new CustomEvent('wizardchess:visual-settings', { detail: { motionLevel, qualityTier } })
+      );
+    }
+
+    function setMotionLevel(level, persist = true) {
+      if (level !== 'full' && level !== 'quick' && level !== 'off') return motionLevel;
+      motionLevel = level;
+      if (persist) visualSettings = saveVisualSettings({ motion: level });
+      announceVisualSettings();
+      return motionLevel;
+    }
+
+    /** `auto` re-runs device detection; any other value is saved as the user's choice. */
+    function setQualityTier(preference, persist = true) {
+      if (preference !== 'auto' && preference !== 'ultra' && preference !== 'high' && preference !== 'base') {
+        return qualityTier;
+      }
+      qualityPreference = preference;
+      qualityTier = preference === 'auto' ? detectQualityTier() : preference;
+      qualityTierSource = preference === 'auto' ? 'auto' : 'saved';
+      slowFrameSeconds = 0;
+      if (persist) visualSettings = saveVisualSettings({ quality: preference });
+      announceVisualSettings();
+      return qualityTier;
+    }
+
+    reducedMotionQuery?.addEventListener?.('change', (e) => {
+      if (!visualSettings.motion) setMotionLevel(e.matches ? 'off' : 'full', false);
+    });
     if (renderer.debug) {
       renderer.debug.checkShaderErrors = false;
     }
@@ -9653,6 +9719,30 @@ export function initWizardChess() {
       updateTurnUI();
     });
 
+    const MOTION_ORDER = ['full', 'quick', 'off'];
+    const MOTION_NAMES = { full: 'Đầy Đủ', quick: 'Nhanh', off: 'Tắt' };
+    const QUALITY_ORDER = ['auto', 'ultra', 'high', 'base'];
+    const QUALITY_NAMES = { ultra: 'Ultra', high: 'High', base: 'Base' };
+    function updateVisualSettingsUI() {
+      const motionLabel = document.getElementById('motion-level-label');
+      if (motionLabel) motionLabel.textContent = `🎬 Hoạt Cảnh: ${MOTION_NAMES[motionLevel]}`;
+      const qualityLabel = document.getElementById('quality-tier-label');
+      if (qualityLabel) {
+        qualityLabel.textContent =
+          qualityPreference === 'auto'
+            ? `✨ Chất Lượng: Tự Động (${QUALITY_NAMES[qualityTier]})`
+            : `✨ Chất Lượng: ${QUALITY_NAMES[qualityTier]}`;
+      }
+    }
+    window.addEventListener('wizardchess:visual-settings', updateVisualSettingsUI);
+    updateVisualSettingsUI();
+    document.getElementById('btn-motion-level')?.addEventListener('click', () => {
+      setMotionLevel(MOTION_ORDER[(MOTION_ORDER.indexOf(motionLevel) + 1) % MOTION_ORDER.length]);
+    });
+    document.getElementById('btn-quality-tier')?.addEventListener('click', () => {
+      setQualityTier(QUALITY_ORDER[(QUALITY_ORDER.indexOf(qualityPreference) + 1) % QUALITY_ORDER.length]);
+    });
+
     document.querySelectorAll('[data-promotion-piece]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const pieceType = btn.getAttribute('data-promotion-piece') || 'queen';
@@ -10128,6 +10218,8 @@ export function initWizardChess() {
       getXiangqiBlockedPointsForPiece: (r, c) =>
         getXiangqiBlockedPointsForPiece(extractPureXiangqiBoard(boardState), r, c),
       getAllLegalMoves: (color) => getAllLegalMoves(color || currentTurn),
+      setMotionLevel,
+      setQualityTier,
       setCombatCameraZoomEnabled: (enabled) => {
         combatCameraZoomEnabled = Boolean(enabled);
         return combatCameraZoomEnabled;
@@ -10379,6 +10471,11 @@ export function initWizardChess() {
           programs: renderer.info?.programs ? renderer.info.programs.length : 0
         },
         audioState: wizardAudio.getState(),
+        motionLevel,
+        qualityTier,
+        qualityTierSource,
+        qualityPreference,
+        gpuRenderer: gpuRendererString,
         scriptedGameActive,
         scriptDeviated,
         scriptMovesCount: scriptMoves.length,
@@ -10954,6 +11051,7 @@ export function initWizardChess() {
       const isMobileNow = Boolean(
         window.innerWidth <= 768 || coarsePointerQuery?.matches
       );
+      trackSlowFramesForTier(frameMs, currentActiveDpr <= (isMobileNow ? 1.35 : 1.0));
       if (isMobileNow) {
         const targetMobileRetinaDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 2.0);
         if (rollingFrameMs > 28.0) {
@@ -11019,6 +11117,21 @@ export function initWizardChess() {
       return currentActiveDpr;
     }
     window.wizardChess.feedFrameTimeSample = feedFrameTimeSample;
+
+    // Once DPR can drop no further, two seconds of slow frames lower the tier for this session only.
+    function trackSlowFramesForTier(frameMs, dprAtFloor) {
+      if (isAutomatedTest && !window.__WIZARD_ALLOW_TIER_DOWNGRADE__) return;
+      if (qualityTier === 'base' || rollingFrameMs <= 20.0 || !dprAtFloor) {
+        slowFrameSeconds = 0;
+        return;
+      }
+      slowFrameSeconds += frameMs / 1000;
+      if (slowFrameSeconds < 2) return;
+      slowFrameSeconds = 0;
+      qualityTier = downgradeTier(qualityTier);
+      qualityTierSource = 'downgraded';
+      announceVisualSettings();
+    }
 
     function animate() {
       rafPending = false;

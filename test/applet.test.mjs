@@ -2155,3 +2155,30 @@ test('runTweens isolates a throwing tween and keeps the others running', async (
   assert.equal(errors[0].message, 'boom');
   assert.equal(ok2Calls, 1);
 });
+
+test('visual settings resolve motion and quality tiers', async () => {
+  const { resolveMotionLevel, pickQualityTier, downgradeTier } = await import('../src/visualSettings.ts');
+  assert.equal(resolveMotionLevel(undefined, true), 'off');
+  assert.equal(resolveMotionLevel(undefined, false), 'full');
+  assert.equal(resolveMotionLevel('quick', true), 'quick');
+  assert.equal(resolveMotionLevel('bogus', false), 'full');
+
+  const mac = {
+    coarsePointer: false,
+    maxTouchPoints: 0,
+    gpuRenderer: 'ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)',
+    isAutomatedTest: false
+  };
+  assert.equal(pickQualityTier({ ...mac, coarsePointer: true }), 'base');
+  assert.equal(pickQualityTier(mac), 'ultra');
+  assert.equal(pickQualityTier({ ...mac, maxTouchPoints: 5 }), 'high');
+  assert.equal(
+    pickQualityTier({ ...mac, gpuRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)' }),
+    'high'
+  );
+  assert.equal(pickQualityTier({ ...mac, isAutomatedTest: true }), 'high');
+
+  assert.equal(downgradeTier('ultra'), 'high');
+  assert.equal(downgradeTier('high'), 'base');
+  assert.equal(downgradeTier('base'), 'base');
+});
