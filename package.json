@@ -16,7 +16,9 @@
     "glb:restore": "node scripts/glb-pipeline.mjs restore-backup",
     "blender:sculpt": "python3 .tools/sculpt_pieces_via_mcp.py && node scripts/glb-pipeline.mjs pack",
     "deploy": "npm run build && CI=true npx wrangler deploy",
-    "deploy:cf": "npm run build && CI=true npx wrangler deploy"
+    "deploy:cf": "npm run build && CI=true npx wrangler deploy",
+    "test": "node --test test/applet.test.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -28,6 +30,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.66.0",
+    "@playwright/test": "^1",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
