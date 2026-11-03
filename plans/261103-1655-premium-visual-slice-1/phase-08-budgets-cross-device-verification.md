@@ -42,9 +42,12 @@ pr: PR B
   0. Guards for a fair number: Playwright sets `navigator.webdriver`, which turns on `preserveDrawingBuffer` (near line 226, one extra copy per frame), and the adaptive DPR drops to 1.0 when frames are slow (near lines 10991-11000), which would hide the real cost. So: add a test-only `window.wizardChess.freezeDpr(true)` that makes `feedFrameTimeSample` skip DPR changes, call it before recording, and include `currentActiveDpr`, `qualityTier` and `gpuRenderer` in the printed JSON.
   1. In `perf-budget.spec.ts`, test `'ultra checkmate p95'`: launch Chromium headed with `--use-angle=metal --disable-gpu-vsync --disable-frame-rate-limit`, viewport 1470x956, `?autotest=1`. Call `setQualityTier('ultra')` and `setMotionLevel('full')`, wait 3 s for warm-up.
   2. `startFrameRecorder()`, call `triggerCheckmateSequence('b', 'w')`, wait 4.2 s, `stopFrameRecorder()`.
-  3. Repeat steps 1-2 three times (fresh page each time). Print each result as one JSON line, plus the median p95 and how many frames were > 33 ms in each run. To count those, `stopFrameRecorder()` also returns `over33` (number of deltas > 33 ms).
-- **Pass condition:** median p95 ≤ 12, and every run has `over33 ≤ 2` (single GC spikes are tolerated), and `currentActiveDpr` equals the desktop cap (1.35).
-- **Verify:** `PERF=1 npx playwright test e2e/perf-budget.spec.ts -g "ultra checkmate" --headed 2>&1 | grep p95` shows values meeting the pass condition. Record the JSON line.
+  3. Repeat steps 1-2 three times (fresh page each time). Print each result as one JSON line, plus the median mean and how many frames were > 33 ms in each run. To count those, `stopFrameRecorder()` also returns `over33` (number of deltas > 33 ms).
+  4. Run once more with vsync on (launch without `--disable-gpu-vsync --disable-frame-rate-limit`, on a 60 Hz or faster display) and print the p95 of that run.
+  5. Before recording, check `uptime`: the 1-minute load average must be below 5. On a busier machine the run is inconclusive and must be repeated, not judged.
+- **Pass condition:** median of the three uncapped means ≤ 12, every uncapped run has `over33 ≤ 2` (single GC spikes are tolerated), `currentActiveDpr` equals the desktop cap (1.35), and the vsync-on run has p95 ≤ 17 (no dropped 60 Hz frames). The uncapped p95 is not judged: without vsync frames are released in clumps, so it sits near twice the mean (phase 4 notes).
+- **If it fails:** apply in order and re-measure after each: quarter-resolution bloom, ultra desktop DPR cap 1.35 to 1.25, GTAO samples 8 to 6 (phase 4 notes). Do not swap SMAA for FXAA.
+- **Verify:** `PERF=1 npx playwright test e2e/perf-budget.spec.ts -g "ultra checkmate" --headed 2>&1 | grep -E 'mean|p95'` shows values meeting the pass condition. Record the JSON lines.
 
 ### Task 8.3 — `base` frame budget under phone emulation
 
@@ -104,7 +107,7 @@ pr: PR B
 
 | # | Criterion | Measured | Pass |
 |---|---|---|---|
-| 1a | `ultra` checkmate median p95 ≤ 12 ms, ≤ 2 frames > 33 ms per run | | |
+| 1a | `ultra` checkmate: median uncapped mean ≤ 12 ms, ≤ 2 frames > 33 ms per run, vsync-on p95 ≤ 17 ms | | |
 | 1b | `base` phone p95 ≤ 16.6 ms | | |
 | 2 | First playable ≤ 10 MB on the wire (staging) | | |
 | 2b | Each skin set ≤ 3.5 MB (staging) | | |

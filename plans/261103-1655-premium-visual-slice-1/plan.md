@@ -72,7 +72,7 @@ This plan is written for a downstream executor model. Every phase lists tasks wi
 Numbers come from the brainstorm contract. Phase 8 measures all of them.
 
 1. **Frame budget:**
-   - `ultra` tier on the dev Mac: median p95 frame time ≤ 12 ms over 3 runs of the checkmate sequence with kill-cam DOF; at most 2 frames > 33 ms per run.
+   - `ultra` tier on the dev Mac (1-minute load average < 5): median mean frame time ≤ 12 ms over 3 uncapped runs of the checkmate sequence with kill-cam DOF, at most 2 frames > 33 ms per run, and p95 ≤ 17 ms in one vsync-on run. Amended 2026-11-03 by the user: uncapped p95 is a frame-pacing artefact.
    - `base` tier under Playwright mobile emulation with 4x CPU throttle: p95 ≤ 16.6 ms during a normal move.
 2. **Wire size:** the first playable load (default skin, default arena) transfers ≤ 10 MB, and each skin set ≤ 3.5 MB, measured by `PerformanceResourceTiming.transferSize` sums on staging. Cloudflare does not compress `.glb`, so phase 2 budgets uncompressed bytes.
 3. **Labels:** at 1470x956 in the default camera with nothing selected and the mouse off the board, `visibleOverheadBadgeCount` is 0. With one piece selected in the start position it is 1 (no capture targets exist yet).
