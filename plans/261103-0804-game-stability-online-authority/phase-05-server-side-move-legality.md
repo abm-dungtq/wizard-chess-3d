@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Server-side move legality"
-status: pending
+status: completed
 effort: 2h
 pr: PR 2
 ---
@@ -140,3 +140,10 @@ Spawn the `kongming` subagent for next-step counsel and pass:
 - the pass condition it failed to meet.
 Apply kongming's guidance, then re-run the Verify step.
 If `kongming` cannot be spawned in this environment, STOP and report the same failure evidence to the user. Never continue by self-reasoning.
+
+## Execution notes
+
+- Promotion is reached by legal play in 9 plies (a4 b5 axb5 a6 bxa6 Bb7 axb7 Nc6 bxa8=N), so the sub-case is not skipped.
+- A non-promotion move keeps the client's requested promotion value, as before; only a real promotion is checked against the legal candidates.
+- The engine already validates with the same `xiangqiAI.ts` and `chessAI.ts` functions, so coordinate parity is structural. The e2e test plays two plies per side from `window.wizardChess.getAllLegalMoves()`, a new read-only debug hook.
+- Gates: lint clean, unit 26/26, `roomStore.ts` line coverage 85.18%, e2e 15 passed and 1 skipped.

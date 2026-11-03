@@ -1921,6 +1921,82 @@ test('Room API security: seat tokens, anti-hijack, caps', async () => {
   assert.equal(overCap.data.error, 'Move limit reached');
 });
 
+test('Room API rejects illegal moves for chess and xiangqi', async () => {
+  const store = new RoomStore();
+  const pair = async (gameVariant) => {
+    const created = await roomApi(store, 'POST', '/api/rooms/create', { playerToken: 'T_W_rules_seat', gameVariant });
+    const code = created.data.code;
+    await roomApi(store, 'POST', '/api/rooms/join', { code, playerToken: 'T_B_rules_seat' });
+    return code;
+  };
+  const play = (code, color, from, to, extra = {}) =>
+    roomApi(store, 'POST', `/api/rooms/${code}/move`, {
+      playerToken: color === 'w' ? 'T_W_rules_seat' : 'T_B_rules_seat',
+      from: { r: from[0], c: from[1] },
+      to: { r: to[0], c: to[1] },
+      ...extra
+    });
+
+  // 1. Chess: a pawn cannot jump across the board, and black cannot move from an empty square
+  const chess = await pair('chess');
+  const jump = await play(chess, 'w', [6, 4], [0, 0]);
+  assert.equal(jump.status, 400);
+  assert.equal(jump.data.error, 'Illegal move');
+  assert.equal((await play(chess, 'w', [6, 4], [4, 4])).status, 200);
+  const empty = await play(chess, 'b', [4, 0], [3, 0]);
+  assert.equal(empty.status, 400);
+  assert.equal(empty.data.error, 'Illegal move');
+
+  // 2. Scholar's mate ends the game
+  const mate = await pair('chess');
+  const scholars = [
+    ['w', [6, 4], [4, 4]],
+    ['b', [1, 4], [3, 4]],
+    ['w', [7, 5], [4, 2]],
+    ['b', [0, 1], [2, 2]],
+    ['w', [7, 3], [3, 7]],
+    ['b', [0, 6], [2, 5]],
+    ['w', [3, 7], [1, 5]]
+  ];
+  for (const [color, from, to] of scholars) {
+    assert.equal((await play(mate, color, from, to)).status, 200, `${color} ${from} -> ${to}`);
+  }
+  const afterMate = await play(mate, 'b', [1, 0], [2, 0]);
+  assert.equal(afterMate.status, 400);
+  assert.equal(afterMate.data.error, 'Game is over');
+
+  // 3. Underpromotion reached by legal play is recorded as chosen
+  const promo = await pair('chess');
+  const toPromotion = [
+    ['w', [6, 0], [4, 0]],
+    ['b', [1, 1], [3, 1]],
+    ['w', [4, 0], [3, 1]],
+    ['b', [1, 0], [2, 0]],
+    ['w', [3, 1], [2, 0]],
+    ['b', [0, 2], [1, 1]],
+    ['w', [2, 0], [1, 1]],
+    ['b', [0, 1], [2, 2]]
+  ];
+  for (const [color, from, to] of toPromotion) {
+    assert.equal((await play(promo, color, from, to)).status, 200, `${color} ${from} -> ${to}`);
+  }
+  const promoted = await play(promo, 'w', [1, 1], [0, 0], { promotion: 'knight' });
+  assert.equal(promoted.status, 200);
+  assert.equal(promoted.data.move.promotion, 'knight');
+
+  // 4. Xiangqi: the horse moves only when its leg is free
+  const xq = await pair('xiangqi');
+  assert.equal((await play(xq, 'w', [9, 1], [7, 2])).status, 200);
+  const xqBlocked = await pair('xiangqi');
+  const hobbled = await play(xqBlocked, 'w', [9, 1], [8, 3]);
+  assert.equal(hobbled.status, 400);
+  assert.equal(hobbled.data.error, 'Illegal move');
+
+  // 5. Reset starts the rules over
+  assert.equal((await roomApi(store, 'POST', `/api/rooms/${mate}/reset`, { playerToken: 'T_B_rules_seat' })).status, 200);
+  assert.equal((await play(mate, 'w', [6, 4], [4, 4])).status, 200);
+});
+
 test('Feedback API: routing, validation, and local fallback without sheet credentials', async () => {
   const call = (method, body) =>
     handleFeedbackApiRequest(

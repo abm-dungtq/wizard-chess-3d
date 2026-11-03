@@ -1,3 +1,5 @@
+import { replayRoomMoves, tryApplyRoomMove, type RulesState } from './roomRules.ts';
+
 export interface RoomCoord {
   r: number;
   c: number;
@@ -33,6 +35,8 @@ interface InternalRoomEntry extends PublicRoomState {
   whiteToken: string | null;
   blackToken: string | null;
   listeners: Set<(room: PublicRoomState) => void>;
+  /** Board cache for move validation; rebuilt from `moves` when missing. */
+  rules?: RulesState;
 }
 
 const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -231,6 +235,7 @@ export class RoomStore {
     } else {
       if ((gameVariant === 'xiangqi' || gameVariant === 'chess') && entry.moves.length === 0) {
         entry.gameVariant = gameVariant;
+        entry.rules = undefined;
       }
       if (entry.whiteToken === token) {
         assignedColor = 'w';
@@ -307,6 +312,11 @@ export class RoomStore {
     };
   }
 
+  private getRules(entry: InternalRoomEntry): RulesState {
+    entry.rules ??= replayRoomMoves(entry.gameVariant || 'chess', entry.moves);
+    return entry.rules;
+  }
+
   recordMove(
     codeInput: string,
     payload: {
@@ -338,16 +348,24 @@ export class RoomStore {
       return { ok: false as const, error: 'Move limit reached', room: toPublicRoom(entry) };
     }
     const moveColor = seat;
+    const from = { r: payload.from.r, c: payload.from.c };
+    const to = { r: payload.to.r, c: payload.to.c };
+    const requestedPromotion = normalizePromotion(payload.promotion);
+    const ruling = tryApplyRoomMove(this.getRules(entry), { color: moveColor, from, to, promotion: requestedPromotion });
+    if (!ruling.ok) {
+      return { ok: false as const, error: ruling.error, room: toPublicRoom(entry) };
+    }
 
     const move: RoomMove = {
       seq: entry.moves.length + 1,
       color: moveColor,
-      from: { r: payload.from.r, c: payload.from.c },
-      to: { r: payload.to.r, c: payload.to.c },
-      promotion: normalizePromotion(payload.promotion),
+      from,
+      to,
+      promotion: ruling.promotion || requestedPromotion,
       ts: Date.now()
     };
 
+    entry.rules = ruling.state;
     entry.moves.push(move);
     entry.turn = moveColor === 'w' ? 'b' : 'w';
     entry.updatedAt = move.ts;
@@ -373,6 +391,7 @@ export class RoomStore {
       entry.gameVariant = gameVariant;
     }
     entry.moves = [];
+    entry.rules = undefined;
     entry.turn = 'w';
     entry.resetCount = (entry.resetCount || 0) + 1;
     entry.updatedAt = Date.now();

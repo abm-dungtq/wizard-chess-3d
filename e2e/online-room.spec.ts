@@ -170,6 +170,36 @@ test.describe('online room', () => {
     expect(b.errors.filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
   });
 
+  test('xiangqi moves picked from the client rules are accepted by the server', async ({ browser }) => {
+    const a = await openPlayer(browser);
+    await a.page.evaluate(() => (window as any).wizardChess.setGameVariant('xiangqi'));
+    await waitForState(a.page, 's.boardCols === 9', 30_000);
+    await waitIdle(a.page);
+    const code = await createRoom(a.page);
+    const b = await openPlayer(browser);
+    await b.page.evaluate((code) => (window as any).wizardChess.joinMultiplayerRoom(code), code);
+    await waitForState(b.page, "s.gameMode === 'multi' && s.roomBothReady && s.boardCols === 9", 30_000);
+    await waitForState(a.page, 's.roomBothReady');
+
+    // Two plies per side, each the first legal move the mover's own client offers.
+    const players = [a, b, a, b];
+    for (let ply = 0; ply < players.length; ply++) {
+      const mover = players[ply].page;
+      await waitIdle(mover);
+      const move = await mover.evaluate(() => (window as any).wizardChess.getAllLegalMoves()[0]);
+      await mover.evaluate(
+        (m) => (window as any).wizardChess.executeChessMove(m.fromR, m.fromC, m.toR, m.toC),
+        move
+      );
+      await waitForState(a.page, `s.moveHistoryCount === ${ply + 1} && !s.isAnimatingMove`, 15_000);
+      await waitForState(b.page, `s.moveHistoryCount === ${ply + 1} && !s.isAnimatingMove`, 15_000);
+    }
+    const server = await a.page.request.get(`/api/rooms/${code}/state`);
+    expect((await server.json()).room.moves.length).toBe(4);
+    expect(a.errors).toEqual([]);
+    expect(b.errors).toEqual([]);
+  });
+
   test('a third player is turned away from a full room', async ({ browser }) => {
     const a = await openPlayer(browser);
     const b = await openPlayer(browser);

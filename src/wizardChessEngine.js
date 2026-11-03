@@ -10127,6 +10127,7 @@ export function initWizardChess() {
       getGameVariant: () => gameVariant,
       getXiangqiBlockedPointsForPiece: (r, c) =>
         getXiangqiBlockedPointsForPiece(extractPureXiangqiBoard(boardState), r, c),
+      getAllLegalMoves: (color) => getAllLegalMoves(color || currentTurn),
       setCombatCameraZoomEnabled: (enabled) => {
         combatCameraZoomEnabled = Boolean(enabled);
         return combatCameraZoomEnabled;
