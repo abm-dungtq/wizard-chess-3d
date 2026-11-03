@@ -46,7 +46,8 @@ interface InternalRoomEntry extends PublicRoomState {
 }
 
 const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const ROOM_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+export const ROOM_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const SSE_KEEPALIVE_MS = 25_000;
 const MAX_ROOM_MOVES = 600;
 const CLIENT_TOKEN_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 const SKIN_ID_PATTERN = /^[a-z0-9_]{1,40}$/;
@@ -587,28 +588,44 @@ export async function handleRoomApiRequest(
 
     const encoder = new TextEncoder();
     let unsubscribe: (() => void) | null = null;
+    let keepalive: ReturnType<typeof setInterval> | null = null;
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+    // Stop listening once the reader is gone, even if its cancellation never reaches us,
+    // so an abandoned stream cannot keep the room (and its Durable Object) alive.
+    const cleanup = () => {
+      unsubscribe?.();
+      unsubscribe = null;
+      if (keepalive) clearInterval(keepalive);
+      keepalive = null;
+      try {
+        streamController?.close();
+      } catch {
+        // Already closed or errored
+      }
+      streamController = null;
+    };
+    const send = (text: string) => {
+      try {
+        streamController?.enqueue(encoder.encode(text));
+      } catch {
+        cleanup();
+      }
+    };
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        unsubscribe = store.subscribe(code, (room) => {
-          const payload = `data: ${JSON.stringify({ room })}\n\n`;
-          controller.enqueue(encoder.encode(payload));
-        });
+        streamController = controller;
+        unsubscribe = store.subscribe(code, (room) => send(`data: ${JSON.stringify({ room })}\n\n`));
+        keepalive = setInterval(() => send(': keepalive\n\n'), SSE_KEEPALIVE_MS);
       },
       cancel() {
-        if (unsubscribe) {
-          unsubscribe();
-          unsubscribe = null;
-        }
+        streamController = null;
+        cleanup();
       }
     });
 
-    request.signal?.addEventListener('abort', () => {
-      if (unsubscribe) {
-        unsubscribe();
-        unsubscribe = null;
-      }
-    });
+    request.signal?.addEventListener('abort', cleanup);
 
     return new Response(stream, {
       status: 200,

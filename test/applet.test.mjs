@@ -2037,6 +2037,29 @@ test('RoomStore exportRoom/importRoom round-trips a room and rebuilds rules', as
   assert.match(generateRoomCode(), /^[A-Z2-9]{4}$/);
 });
 
+test('room event streams unsubscribe when the reader goes away', async () => {
+  const store = new RoomStore();
+  const created = await roomApi(store, 'POST', '/api/rooms/create', { playerToken: 'T_W_sse_seat' });
+  const code = created.data.code;
+
+  const cancelled = await handleRoomApiRequest(new Request(`http://localhost/api/rooms/${code}/events`), store);
+  const reader = cancelled.body.getReader();
+  await reader.read();
+  assert.equal(store.hasListeners(code), true);
+  await reader.cancel();
+  assert.equal(store.hasListeners(code), false);
+
+  const aborter = new AbortController();
+  const aborted = await handleRoomApiRequest(
+    new Request(`http://localhost/api/rooms/${code}/events`, { signal: aborter.signal }),
+    store
+  );
+  await aborted.body.getReader().read();
+  assert.equal(store.hasListeners(code), true);
+  aborter.abort();
+  assert.equal(store.hasListeners(code), false);
+});
+
 test('worker routes rooms to the Durable Object by code', async () => {
   const { default: worker } = await import('../src/worker.ts');
   const routed = [];

@@ -1,4 +1,4 @@
-import { RoomStore, handleRoomApiRequest, type RoomSnapshot } from './roomStore.ts';
+import { ROOM_TTL_MS, RoomStore, handleRoomApiRequest, type RoomSnapshot } from './roomStore.ts';
 
 // Minimal local shapes of the Durable Object runtime, so Node tests can load this file
 // without `cloudflare:workers`.
@@ -15,7 +15,6 @@ interface DOState {
 }
 
 const SNAPSHOT_KEY = 'room';
-const IDLE_EXPIRY_MS = 2 * 60 * 60 * 1000;
 const LISTENER_RECHECK_MS = 30 * 60 * 1000;
 
 function roomCodeFromPath(pathname: string): string {
@@ -58,7 +57,7 @@ export class RoomDurableObject {
       const snapshot = this.store.exportRoom(this.code);
       if (snapshot) {
         await this.state.storage.put(SNAPSHOT_KEY, snapshot);
-        await this.state.storage.setAlarm(Date.now() + IDLE_EXPIRY_MS);
+        await this.state.storage.setAlarm(Date.now() + ROOM_TTL_MS);
       } else {
         await this.state.storage.deleteAll();
       }

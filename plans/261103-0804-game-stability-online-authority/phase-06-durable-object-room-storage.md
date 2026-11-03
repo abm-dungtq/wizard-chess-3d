@@ -231,3 +231,10 @@ A failed deploy, an authentication prompt from `wrangler`, or a production smoke
 - Local run: `E2E_BASE_URL=http://localhost:8797` online-room suite passed 7/7. A room created before a `wrangler dev` restart still returned `"ok":true` afterwards.
 - The legacy unit assertion that forbade `new_sqlite_classes` in `wrangler.jsonc` now requires the DO binding and migration.
 - Gates before commit: lint clean, unit 28/28, build OK, e2e 15 passed and 1 skipped.
+
+## Adjustments from the pre-deploy checkpoint
+
+- Room event streams send a keepalive comment every 25 s and unsubscribe themselves when a write fails, the reader cancels, or the request aborts. An abandoned stream can no longer pin the room's Durable Object active, which matters for the Free-plan duration budget.
+- The Durable Object reuses `ROOM_TTL_MS` from `roomStore.ts` for its idle alarm.
+- No rollback after migration v1 is live: Cloudflare blocks rollbacks across a Durable Object class change. Production is forward-fix only; the emergency stop is `ROOMS_BACKEND=memory`.
+- After the fix: lint clean, unit 29/29, local Durable Object online-room suite 7/7, Vite e2e 15 passed and 1 skipped.
