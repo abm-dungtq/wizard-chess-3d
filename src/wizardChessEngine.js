@@ -26,6 +26,7 @@ import {
   XIANGQI_ROLE_METADATA
 } from './xiangqiAI.ts';
 import { wizardAudio } from './soundEngine.ts';
+import { runTweens } from './tweenRunner.ts';
 
 /** @type {any} */
 const THREE = THREE_NS;
@@ -224,9 +225,8 @@ export function initWizardChess() {
       preserveDrawingBuffer: isAutomatedTest
     });
     const maxTargetDpr = Math.min(window.devicePixelRatio || 1, 1.35);
-    const isCoarseOrMobile = Boolean(
-      window.innerWidth <= 768 || window.matchMedia?.('(pointer: coarse)')?.matches
-    );
+    const coarsePointerQuery = window.matchMedia?.('(pointer: coarse)');
+    const isCoarseOrMobile = Boolean(window.innerWidth <= 768 || coarsePointerQuery?.matches);
     const nativeDeviceDpr = window.devicePixelRatio || 1;
     const mobileRetinaDpr = Math.min(Math.max(nativeDeviceDpr, 1.75), 2.0);
     let currentActiveDpr = isCoarseOrMobile ? mobileRetinaDpr : maxTargetDpr;
@@ -371,15 +371,26 @@ export function initWizardChess() {
     orbitControls.update();
     orbitControls.enabled = !isCameraLocked;
 
+    let camPresetButtons = null;
+    let camPresetActiveCleared = false;
+    function clearCameraPresetActive() {
+      if (camPresetActiveCleared) return;
+      if (!camPresetButtons) {
+        const found = document.querySelectorAll('#btn-cam-player, #btn-cam-wide, #btn-cam-top, #btn-cam-side');
+        if (found.length === 4) camPresetButtons = found;
+      }
+      const buttons = camPresetButtons || [];
+      for (const b of buttons) b.classList.remove('active');
+      if (camPresetButtons) camPresetActiveCleared = true;
+    }
+
     let orbitDragStartPos = null;
     orbitControls.addEventListener('start', () => {
       orbitDragStartPos = camera.position.clone();
     });
     orbitControls.addEventListener('change', () => {
       if (orbitDragStartPos && camera.position.distanceTo(orbitDragStartPos) > 0.08) {
-        document
-          .querySelectorAll('#btn-cam-player, #btn-cam-wide, #btn-cam-top, #btn-cam-side')
-          .forEach((b) => b.classList.remove('active'));
+        clearCameraPresetActive();
       }
     });
     orbitControls.addEventListener('end', () => {
@@ -3781,8 +3792,11 @@ export function initWizardChess() {
     }
 
     let xiangqiModelsLoadPromise = null;
+    // After a failed load, every piece missing a template would retry at once; wait before refetching.
+    let xiangqiLoadRetryAt = 0;
     function ensureXiangqiModelsLoaded() {
       if (xiangqiModelsLoadPromise) return xiangqiModelsLoadPromise;
+      if (Date.now() < xiangqiLoadRetryAt) return Promise.resolve();
       xiangqiModelsLoadPromise = (async () => {
         try {
           await Promise.all(
@@ -3810,6 +3824,7 @@ export function initWizardChess() {
         } catch (err) {
           console.warn('Xiangqi sculpted models load warning:', err);
           xiangqiModelsLoadPromise = null;
+          xiangqiLoadRetryAt = Date.now() + 5000;
         }
       })();
       return xiangqiModelsLoadPromise;
@@ -4154,6 +4169,18 @@ export function initWizardChess() {
     let roomEventSource = null;
     let roomPollTimer = null;
     let appliedMoveSeq = 0;
+    let remoteSyncSession = 0; // bump to cancel any in-flight remote drain
+    let latestRemoteRoom = null; // newest room snapshot from any sync source
+    let remoteDrainActive = false; // only one drain loop at a time
+    let multiPlyCount = 0; // plies on the board since the last reset; unlike moveHistory, never capped
+    let lastResyncAt = 0;
+    let variantSwitchPending = false;
+    let tweenErrorPending = false;
+    // Only flags the failure: runTweens is still iterating activeMoveTweens when this runs.
+    const reportTweenError = (err) => {
+      tweenErrorPending = true;
+      console.error('Move tween failed; dropped', err);
+    };
     let appliedResetCount = 0;
     let roomBothReady = false;
     let roomInviteCopied = false;
@@ -4983,6 +5010,28 @@ export function initWizardChess() {
       return true;
     }
 
+    // A dropped move tween never reaches finishMove, so roll back the half-applied ply.
+    function recoverFromDroppedMoveTween() {
+      if (!isAnimatingMove) return;
+      const entry = moveHistory.pop();
+      if (entry) multiPlyCount = Math.max(0, multiPlyCount - 1);
+      if (!entry || !entry.snapshot || !restoreBoardSnapshot(entry.snapshot)) {
+        activeMoveTweens.length = 0;
+        isAnimatingMove = false;
+      }
+      syncActionButtonsUI();
+      if (gameMode !== 'multi') {
+        maybeScheduleAIMove();
+        return;
+      }
+      if (latestRemoteRoom && performance.now() - lastResyncAt > 2000) {
+        resyncFromRoomMoves(latestRemoteRoom);
+      } else {
+        // Let the next room update replay the rolled-back ply from the server list.
+        appliedMoveSeq = Math.min(appliedMoveSeq, multiPlyCount);
+      }
+    }
+
     function undoLastMove() {
       if (pendingPromotion) {
         hidePromotionModal();
@@ -4996,6 +5045,7 @@ export function initWizardChess() {
       // pop back 2 plies (AI reply + player's last move) so the human gets their turn back.
       // In 2-Player Pass & Play mode (isPassAndPlay || !aiAutoPlay), always pop exactly 1 ply.
       let targetEntry = moveHistory.pop();
+      if (targetEntry) multiPlyCount = Math.max(0, multiPlyCount - 1);
       if (
         gameMode === 'single' &&
         !isPassAndPlay &&
@@ -5006,6 +5056,7 @@ export function initWizardChess() {
         moveHistory.length > 0
       ) {
         targetEntry = moveHistory.pop();
+        if (targetEntry) multiPlyCount = Math.max(0, multiPlyCount - 1);
       }
       if (!targetEntry || !targetEntry.snapshot) return false;
       const ok = restoreBoardSnapshot(targetEntry.snapshot);
@@ -5056,6 +5107,7 @@ export function initWizardChess() {
       capturedByWhite = 0;
       capturedByBlack = 0;
       moveHistory = [];
+      multiPlyCount = 0;
       enPassantTarget = null;
       halfMoveClock = 0;
       lastMoveSquares = null;
@@ -5446,7 +5498,7 @@ export function initWizardChess() {
     function showEnemyInspectHighlight(r, c) {
       clearSquareHighlights();
       const isTouchOrCompact = Boolean(
-        window.innerWidth <= 768 || window.matchMedia?.('(pointer: coarse)')?.matches
+        window.innerWidth <= 768 || coarsePointerQuery?.matches
       );
       const selGeo = isTouchOrCompact ? sharedSelRingGeoMobile : sharedSelRingGeoDesktop;
       const inspectMesh = new THREE.Mesh(selGeo, sharedEnemyInspectRingMat);
@@ -5459,7 +5511,7 @@ export function initWizardChess() {
     function showSquareHighlights(r, c, moves) {
       clearSquareHighlights();
       const isTouchOrCompact = Boolean(
-        window.innerWidth <= 768 || window.matchMedia?.('(pointer: coarse)')?.matches
+        window.innerWidth <= 768 || coarsePointerQuery?.matches
       );
       const selGeo = isTouchOrCompact ? sharedSelRingGeoMobile : sharedSelRingGeoDesktop;
       const selMesh = new THREE.Mesh(selGeo, sharedSelRingMat);
@@ -6238,6 +6290,7 @@ export function initWizardChess() {
           promotion: chosenPromotion
         }
       });
+      multiPlyCount += 1;
       if (moveHistory.length > 60) {
         moveHistory.shift();
       }
@@ -7652,10 +7705,7 @@ export function initWizardChess() {
       let safety = 0;
       while (activeMoveTweens.length > 0 && safety < 200) {
         safety++;
-        for (let i = activeMoveTweens.length - 1; i >= 0; i--) {
-          const done = activeMoveTweens[i](0.05);
-          if (done) activeMoveTweens.splice(i, 1);
-        }
+        runTweens(activeMoveTweens, 0.05, reportTweenError);
       }
     }
 
@@ -7762,6 +7812,7 @@ export function initWizardChess() {
       }
 
       const lastEntry = moveHistory.pop();
+      if (lastEntry) multiPlyCount = Math.max(0, multiPlyCount - 1);
       restoreBoardSnapshot(lastEntry.snapshot);
       return true;
     }
@@ -8851,7 +8902,10 @@ export function initWizardChess() {
 
     function ensurePlayerToken() {
       if (!playerToken) {
-        playerToken = 'tok_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+        playerToken =
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : 'tok_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
         saveStoredPlayerToken(playerToken);
       }
       return playerToken;
@@ -8864,41 +8918,62 @@ export function initWizardChess() {
       for (const base of bases) {
         try {
           const res = await fetch(`${base}${apiPath}`, options);
-          if (res.ok) {
-            const ct = res.headers.get('content-type') || '';
-            if (ct.includes('application/json')) {
-              return await res.json();
-            }
+          const ct = res.headers.get('content-type') || '';
+          // Any JSON answer (including 4xx rejections) comes from a live room server.
+          if (ct.includes('application/json')) {
+            return await res.json();
           }
         } catch (e) {}
       }
       return null;
     }
 
+    function showRoomApiError(message) {
+      const mpMsg = document.getElementById('mp-status-msg');
+      if (mpMsg) mpMsg.textContent = message;
+      const duelStatusEl = document.getElementById('duel-status-msg');
+      if (duelStatusEl) duelStatusEl.textContent = `Máy chủ phòng từ chối: ${message}`;
+    }
+
+    function pushStaticRoomMove(movePayload) {
+      const stRoom = getStaticRoom(roomCode);
+      if (!stRoom) return;
+      stRoom.moves = stRoom.moves || [];
+      stRoom.moves.push({
+        seq: stRoom.moves.length + 1,
+        color: movePayload.color,
+        from: movePayload.from,
+        to: movePayload.to,
+        promotion: movePayload.promotion || 'queen',
+        ts: Date.now()
+      });
+      stRoom.turn = movePayload.color === 'w' ? 'b' : 'w';
+      stRoom.updatedAt = Date.now();
+      saveAndBroadcastStaticRoom(stRoom);
+    }
+
     async function sendMultiplayerMove(movePayload) {
       if (!roomCode) return;
-      // 1. Update static local/BroadcastChannel room store immediately
-      const stRoom = getStaticRoom(roomCode);
-      if (stRoom) {
-        stRoom.moves = stRoom.moves || [];
-        stRoom.moves.push({
-          seq: stRoom.moves.length + 1,
-          color: movePayload.color,
-          from: movePayload.from,
-          to: movePayload.to,
-          promotion: movePayload.promotion || 'queen',
-          ts: Date.now()
-        });
-        stRoom.turn = movePayload.color === 'w' ? 'b' : 'w';
-        stRoom.updatedAt = Date.now();
-        saveAndBroadcastStaticRoom(stRoom);
-      }
-      // 2. Also broadcast to cloud/local room API if reachable
-      await mpApiRequest(`/api/rooms/${roomCode}/move`, {
+      // Static hosts have no room server; share the move with other tabs right away.
+      if (isStaticHost) pushStaticRoomMove(movePayload);
+      const data = await mpApiRequest(`/api/rooms/${roomCode}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(movePayload)
       });
+      if (data === null) {
+        // Server unreachable: the static localStorage/BroadcastChannel room carries the game.
+        if (!isStaticHost) pushStaticRoomMove(movePayload);
+        return;
+      }
+      if (!data.ok) {
+        // Only the server's move list is authoritative; a rejected move must not reach other tabs.
+        if (data.room) {
+          saveAndBroadcastStaticRoom(data.room);
+          resyncFromRoomMoves(data.room);
+        }
+        showRoomApiError(data.error || 'Move rejected');
+      }
     }
 
     function stopMultiplayerSync() {
@@ -8910,10 +8985,77 @@ export function initWizardChess() {
         clearInterval(roomPollTimer);
         roomPollTimer = null;
       }
+      remoteSyncSession += 1;
+      remoteDrainActive = false;
+      latestRemoteRoom = null;
+    }
+
+    function drainRemoteMoves(session) {
+      if (remoteDrainActive) return;
+      remoteDrainActive = true;
+      const step = () => {
+        if (session !== remoteSyncSession || gameMode !== 'multi') {
+          if (session === remoteSyncSession) remoteDrainActive = false;
+          return;
+        }
+        const room = latestRemoteRoom;
+        // A variant switch loads models asynchronously; wait for it like an animation.
+        if (isAnimatingMove || variantSwitchPending) {
+          setTimeout(step, 120);
+          return;
+        }
+        const moves = room?.moves || [];
+        if (appliedMoveSeq >= moves.length) {
+          remoteDrainActive = false;
+          return;
+        }
+        const next = moves[appliedMoveSeq];
+        const piece = boardState[next.from.r]?.[next.from.c];
+        const inSync =
+          multiPlyCount === appliedMoveSeq && piece && piece.color === currentTurn && piece.color === next.color;
+        if (!inSync) {
+          remoteDrainActive = false;
+          resyncFromRoomMoves(room);
+          return;
+        }
+        executeChessMove(next.from.r, next.from.c, next.to.r, next.to.c, {
+          fromRemote: true,
+          promotion: next.promotion || 'queen'
+        });
+        appliedMoveSeq = next.seq;
+        setTimeout(step, 250);
+      };
+      step();
+    }
+
+    function resyncFromRoomMoves(room) {
+      if (!room || !Array.isArray(room.moves) || variantSwitchPending) return false;
+      remoteSyncSession += 1;
+      remoteDrainActive = false;
+      lastResyncAt = performance.now();
+      if (isAnimatingMove) completeCurrentMoveImmediately();
+      resetChessBoard(false);
+      appliedMoveSeq = 0;
+      for (const move of room.moves) {
+        const applied = executeChessMove(move.from.r, move.from.c, move.to.r, move.to.c, {
+          fromRemote: true,
+          promotion: move.promotion || 'queen'
+        });
+        if (applied !== false) completeCurrentMoveImmediately();
+        if (applied === false || isAnimatingMove) {
+          console.error('Room resync stopped at an unplayable move', room.code, move.seq);
+          return false;
+        }
+        appliedMoveSeq = move.seq;
+      }
+      console.warn('Room resynced from server move list', room.code, room.moves.length);
+      return true;
     }
 
     function applyRemoteRoomState(room) {
       if (!room) return;
+      if (roomCode && room.code && room.code !== roomCode) return;
+      latestRemoteRoom = room;
       const statusEl = document.getElementById('hud-room-status');
       const bothReady = Boolean(room.whiteJoined && room.blackJoined);
       const prevBothReady = roomBothReady;
@@ -8956,12 +9098,21 @@ export function initWizardChess() {
           gameVariant = room.gameVariant;
           chessBoardDeckGroup.visible = gameVariant === 'chess';
           xiangqiBoardDeckGroup.visible = gameVariant === 'xiangqi';
+          remoteSyncSession += 1;
+          remoteDrainActive = false;
           if (gameVariant === 'xiangqi') {
+            // The board still holds the old variant until the models load; hold remote moves until then.
+            variantSwitchPending = true;
             ensureXiangqiModelsLoaded().then(() => {
               resetChessBoard(false);
+              appliedMoveSeq = 0;
+              variantSwitchPending = false;
+              if (latestRemoteRoom && gameMode === 'multi') drainRemoteMoves(remoteSyncSession);
             });
           } else {
+            variantSwitchPending = false;
             resetChessBoard(false);
+            appliedMoveSeq = 0;
           }
         }
       }
@@ -8975,34 +9126,14 @@ export function initWizardChess() {
 
       if (room.resetCount > appliedResetCount) {
         appliedResetCount = room.resetCount;
+        remoteSyncSession += 1;
+        remoteDrainActive = false;
         appliedMoveSeq = 0;
         resetChessBoard(false);
       }
 
       if (Array.isArray(room.moves) && room.moves.length > appliedMoveSeq) {
-        const tryApplyNext = () => {
-          if (isAnimatingMove) {
-            setTimeout(tryApplyNext, 120);
-            return;
-          }
-          if (appliedMoveSeq >= room.moves.length) return;
-          const nextMove = room.moves[appliedMoveSeq];
-          appliedMoveSeq = nextMove.seq || (appliedMoveSeq + 1);
-          const pieceAtFrom = boardState[nextMove.from.r]?.[nextMove.from.c];
-          if (pieceAtFrom && pieceAtFrom.color === currentTurn) {
-            executeChessMove(
-              nextMove.from.r,
-              nextMove.from.c,
-              nextMove.to.r,
-              nextMove.to.c,
-              { fromRemote: true, promotion: nextMove.promotion || 'queen' }
-            );
-          }
-          if (appliedMoveSeq < room.moves.length) {
-            setTimeout(tryApplyNext, 250);
-          }
-        };
-        tryApplyNext();
+        drainRemoteMoves(remoteSyncSession);
       }
     }
 
@@ -9057,8 +9188,13 @@ export function initWizardChess() {
         })
       });
 
+      if (data && !data.ok) {
+        showRoomApiError(data.error || 'Could not create room');
+        return false;
+      }
+
       // Pure static fallback if neither local nor remote server is reachable
-      if (!data || !data.ok) {
+      if (!data) {
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         let genCode = '';
         for (let i = 0; i < 4; i++) {
@@ -9152,7 +9288,12 @@ export function initWizardChess() {
         body: JSON.stringify({ code, playerToken, skinId: currentPieceThemeId })
       });
 
-      if (!data || !data.ok) {
+      if (data && !data.ok) {
+        showRoomApiError(data.error || 'Could not join room');
+        return false;
+      }
+
+      if (!data) {
         let stRoom = getStaticRoom(code);
         let assignedColor = 'b';
         if (!stRoom) {
@@ -9233,6 +9374,7 @@ export function initWizardChess() {
     ];
 
     function setActiveCamButton(activeId) {
+      camPresetActiveCleared = false;
       for (const id of camButtons) {
         const el = document.getElementById(id);
         if (el) el.classList.toggle('active', id === activeId);
@@ -9571,7 +9713,14 @@ export function initWizardChess() {
           saveAndBroadcastStaticRoom(stRoom);
           applyRemoteRoomState(stRoom);
         }
-        await mpApiRequest(`/api/rooms/${roomCode}/reset`, { method: 'POST' });
+        const resetData = await mpApiRequest(`/api/rooms/${roomCode}/reset`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerToken })
+        });
+        if (resetData && !resetData.ok) {
+          showRoomApiError(resetData.error || 'Reset rejected');
+        }
       } else {
         resetChessBoard(true, false);
       }
@@ -9801,7 +9950,8 @@ export function initWizardChess() {
       }
       await mpApiRequest(`/api/rooms/${roomCode}/skin`, {
         method: 'POST',
-        body: JSON.stringify({ color: side, skinId })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerToken, color: side, skinId })
       });
     }
 
@@ -10117,6 +10267,11 @@ export function initWizardChess() {
       stepScriptForward,
       stepScriptBackward,
       triggerCheckmateSequence,
+      injectFaultyTweenForTest: () => {
+        activeMoveTweens.push(() => {
+          throw new Error('injected tween fault');
+        });
+      },
       testColumnCollisionSlide: (startArr, endArr, steps = 20) => {
         activeCamTransition = null;
         camera.position.set(startArr[0], startArr[1], startArr[2]);
@@ -10159,6 +10314,7 @@ export function initWizardChess() {
         lastMoveSquares = null;
         drawReason = '';
         moveHistory = [];
+        multiPlyCount = 0;
         hidePromotionModal();
         clearCheckmateSequence();
         clearSquareHighlights();
@@ -10434,9 +10590,15 @@ export function initWizardChess() {
     let elapsedTotal = 0;
     let idleMixerAccum = 0;
     let shadowUpdateAccum = 0;
+    let animIdleFrames = 0;
+    // Per-frame scratch vectors for stepScene; never stored beyond the frame.
+    const _prevCamPos = new THREE.Vector3();
+    const _camForward = new THREE.Vector3();
+    const _camRight = new THREE.Vector3();
+    const _camHorizDir = new THREE.Vector3();
     function stepScene(dt, doRender = true) {
       elapsedTotal += dt;
-      const prevCamPos = camera.position.clone();
+      const prevCamPos = _prevCamPos.copy(camera.position);
 
       if (isAnimatingMove && activeCombatMixers.size > 0) {
         idleMixerAccum += dt;
@@ -10491,9 +10653,20 @@ export function initWizardChess() {
         }
       }
 
-      for (let i = activeMoveTweens.length - 1; i >= 0; i--) {
-        const done = activeMoveTweens[i](dt);
-        if (done) activeMoveTweens.splice(i, 1);
+      runTweens(activeMoveTweens, dt, reportTweenError);
+      if (tweenErrorPending) {
+        tweenErrorPending = false;
+        recoverFromDroppedMoveTween();
+      }
+      // Last-resort fallback: a move flagged as animating with nothing left to animate never finishes.
+      if (isAnimatingMove && activeMoveTweens.length === 0 && !preMoveHighlightTask) {
+        animIdleFrames += 1;
+      } else {
+        animIdleFrames = 0;
+      }
+      if (animIdleFrames > 90) {
+        animIdleFrames = 0;
+        recoverFromDroppedMoveTween();
       }
 
       // Feature 4: Video-game style WASD + R/F camera translation AND Arrow-key camera rotation
@@ -10505,16 +10678,16 @@ export function initWizardChess() {
         const maxVertSpeed = 2.6 * moveSpeedScale; // 0.26 m/s at default 10%
         const maxRotSpeed = 1.2 * rotSpeedScale;   // 0.12 rad/s at default 10%
 
-        const forward = new THREE.Vector3().subVectors(orbitControls.target, camera.position);
+        const forward = _camForward.subVectors(orbitControls.target, camera.position);
         forward.y = 0;
         if (forward.lengthSq() < 1e-6) {
           camera.getWorldDirection(forward);
           forward.y = 0;
         }
         forward.normalize();
-        const right = new THREE.Vector3(-forward.z, 0, forward.x).normalize();
+        const right = _camRight.set(-forward.z, 0, forward.x).normalize();
 
-        const horizDir = new THREE.Vector3(0, 0, 0);
+        const horizDir = _camHorizDir.set(0, 0, 0);
         if (heldCameraKeys.has('KeyW')) horizDir.add(forward);
         if (heldCameraKeys.has('KeyS')) horizDir.sub(forward);
         if (heldCameraKeys.has('KeyD')) horizDir.add(right);
@@ -10579,9 +10752,7 @@ export function initWizardChess() {
           }
 
           if (heldCameraKeys.size > 0) {
-            document
-              .querySelectorAll('#btn-cam-player, #btn-cam-wide, #btn-cam-top, #btn-cam-side')
-              .forEach((b) => b.classList.remove('active'));
+            clearCameraPresetActive();
           }
         }
       }
@@ -10780,7 +10951,7 @@ export function initWizardChess() {
       }
       rollingFrameMs = rollingFrameMs * 0.88 + frameMs * 0.12;
       const isMobileNow = Boolean(
-        window.innerWidth <= 768 || window.matchMedia?.('(pointer: coarse)')?.matches
+        window.innerWidth <= 768 || coarsePointerQuery?.matches
       );
       if (isMobileNow) {
         const targetMobileRetinaDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 2.0);
@@ -10863,7 +11034,7 @@ export function initWizardChess() {
 
     function handleViewportResize() {
       const isMobileNow = Boolean(
-        window.innerWidth <= 768 || window.matchMedia?.('(pointer: coarse)')?.matches
+        window.innerWidth <= 768 || coarsePointerQuery?.matches
       );
       if (isMobileNow) {
         currentActiveDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 2.0);
@@ -10890,8 +11061,17 @@ export function initWizardChess() {
       }
     }
 
-    window.addEventListener('resize', handleViewportResize);
-    window.visualViewport?.addEventListener('resize', handleViewportResize);
+    // Mobile URL-bar show/hide fires bursts of resize events; apply at most one per frame.
+    let resizeRafId = 0;
+    function scheduleViewportResize() {
+      if (resizeRafId) return;
+      resizeRafId = requestAnimationFrame(() => {
+        resizeRafId = 0;
+        handleViewportResize();
+      });
+    }
+    window.addEventListener('resize', scheduleViewportResize);
+    window.visualViewport?.addEventListener('resize', scheduleViewportResize);
 
 
     // Startup sequence (Standalone Single-Player AI Studio Applet)

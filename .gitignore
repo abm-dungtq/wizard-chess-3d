@@ -7,3 +7,5 @@ dist/
 .env
 .env.*
 *.mp4
+test-results/
+playwright-report/

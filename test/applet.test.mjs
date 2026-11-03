@@ -35,7 +35,7 @@ import {
   chooseBestXiangqiMoveAsync
 } from '../src/xiangqiAI.ts';
 import { wizardAudio, WizardAudioEngine } from '../src/soundEngine.ts';
-import { RoomStore, handleRoomApiRequest } from '../src/roomStore.ts';
+import { RoomStore, handleRoomApiRequest, handleFeedbackApiRequest } from '../src/roomStore.ts';
 
 const ROOT = process.cwd();
 
@@ -864,8 +864,9 @@ test('2-Player Mode (Pass & Play Hotseat, Seamless Capture Auto-Flip Camera, 1-P
 
   // 4. Null-safe Cross-Tab ?room=CODE sync & pawn promotion forwarding
   assert.ok(
-    engineJs.includes("{ fromRemote: true, promotion: nextMove.promotion || 'queen' }"),
-    'applyRemoteRoomState must forward promotion choice to executeChessMove'
+    engineJs.includes("promotion: next.promotion || 'queen'") &&
+      engineJs.includes("promotion: move.promotion || 'queen'"),
+    'drainRemoteMoves and resyncFromRoomMoves must forward promotion choice to executeChessMove'
   );
   assert.ok(
     !engineJs.includes("document.getElementById('modal-room-code').textContent") &&
@@ -917,9 +918,10 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
     'playerToken must use sessionStorage first so two tabs on the same browser receive distinct seats while F5 refresh reconnects'
   );
   assert.ok(
-    engineJs.includes('if (pieceAtFrom && pieceAtFrom.color === currentTurn)') &&
+    engineJs.includes('function drainRemoteMoves(session)') &&
+      engineJs.includes('piece.color === currentTurn && piece.color === next.color') &&
       engineJs.includes("gameMode !== 'multi' && moveHistory.length > 0"),
-    'applyRemoteRoomState must guard turn color and syncActionButtonsUI must lock #btn-undo in online multi mode'
+    'drainRemoteMoves must guard turn color and syncActionButtonsUI must lock #btn-undo in online multi mode'
   );
   assert.ok(
     engineJs.includes("document.getElementById('duel-room-overlay')?.classList.contains('visible')"),
@@ -1050,7 +1052,9 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
     store
   );
   const spectatorData = await spectatorRes.json();
-  assert.equal(spectatorData.ok, true);
+  assert.equal(spectatorRes.status, 409);
+  assert.equal(spectatorData.ok, false);
+  assert.equal(spectatorData.error, 'Room is full');
 
   // Missing room 404 checks across state, move, reset, events
   for (const req of [
@@ -1147,7 +1151,7 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
   );
   assert.equal(invalidCoordRes?.status, 400);
 
-  // Unauthorized White token must be rejected (400)
+  // Unauthorized White token must be rejected (403)
   const unauthWhiteRes = await handleRoomApiRequest(
     new Request(`http://localhost/api/rooms/${roomCode}/move`, {
       method: 'POST',
@@ -1161,7 +1165,7 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
     }),
     store
   );
-  assert.equal(unauthWhiteRes?.status, 400);
+  assert.equal(unauthWhiteRes?.status, 403);
 
   // Out-of-turn move by Black on White's turn must be rejected (400)
   const badMoveRes = await handleRoomApiRequest(
@@ -1204,7 +1208,7 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
   const moveChunk = await reader.read();
   assert.ok(decoder.decode(moveChunk.value).includes('"promotion":"knight"'));
 
-  // Unauthorized Black token on Black's turn must be rejected (400)
+  // Unauthorized Black token on Black's turn must be rejected (403)
   const unauthBlackRes = await handleRoomApiRequest(
     new Request(`http://localhost/api/rooms/${roomCode}/move`, {
       method: 'POST',
@@ -1218,7 +1222,7 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
     }),
     store
   );
-  assert.equal(unauthBlackRes?.status, 400);
+  assert.equal(unauthBlackRes?.status, 403);
 
   // Legal move by Black (default promotion normalization) succeeds
   const blackMoveRes = await handleRoomApiRequest(
@@ -1244,7 +1248,11 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
 
   // Reset room increments resetCount and clears moves
   const resetRes = await handleRoomApiRequest(
-    new Request(`http://localhost/api/rooms/${roomCode}/reset`, { method: 'POST' }),
+    new Request(`http://localhost/api/rooms/${roomCode}/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerToken: 'tok_host_white' })
+    }),
     store
   );
   const resetData = await resetRes.json();
@@ -1258,7 +1266,7 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
     new Request(`http://localhost/api/rooms/${roomCode}/skin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ color: 'w', skinId: 'dong_son' })
+      body: JSON.stringify({ playerToken: 'tok_host_white', skinId: 'dong_son' })
     }),
     store
   );
@@ -1345,8 +1353,9 @@ test('Mobile Gameplay Optimization Contract: Portrait Frustum-Fit Camera, Anti-O
     engineJs.includes('function getPortraitFramingFactor()') &&
       engineJs.includes('function syncResponsiveCameraFov()') &&
       engineJs.includes('function handleViewportResize()') &&
-      engineJs.includes("window.visualViewport?.addEventListener('resize', handleViewportResize)"),
-    'Engine must implement getPortraitFramingFactor, syncResponsiveCameraFov, and handleViewportResize'
+      engineJs.includes("window.visualViewport?.addEventListener('resize', scheduleViewportResize)") &&
+      engineJs.includes('function scheduleViewportResize()'),
+    'Engine must implement getPortraitFramingFactor, syncResponsiveCameraFov, and a rAF-coalesced handleViewportResize'
   );
 
   // 4. Two-Stage Anti-Occlusion Ray Piercing, Magnetic Touch Assist & Web Audio Gesture Unlock
@@ -1804,3 +1813,162 @@ test('22. Dual-Mode 3D Engine, Audio & RoomStore Integration (Cờ Vua 8x8 <-> C
 
 
 
+
+async function roomApi(store, method, pathName, body) {
+  const init = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  const res = await handleRoomApiRequest(new Request(`http://localhost${pathName}`, init), store);
+  return { status: res.status, data: await res.json() };
+}
+
+test('Room API security: seat tokens, anti-hijack, caps', async () => {
+  const store = new RoomStore();
+  const created = await roomApi(store, 'POST', '/api/rooms/create', { preferredColor: 'w', playerToken: 'T_W_seat_token' });
+  assert.equal(created.status, 200);
+  const code = created.data.code;
+  const joined = await roomApi(store, 'POST', '/api/rooms/join', { code, playerToken: 'T_B_seat_token' });
+  assert.equal(joined.data.color, 'b');
+  const e4 = { from: { r: 6, c: 4 }, to: { r: 4, c: 4 } };
+
+  // 1. Missing or wrong token cannot move
+  assert.equal((await roomApi(store, 'POST', `/api/rooms/${code}/move`, { color: 'w', ...e4 })).status, 403);
+  assert.equal((await roomApi(store, 'POST', `/api/rooms/${code}/move`, { playerToken: 'wrong', color: 'w', ...e4 })).status, 403);
+
+  // 2. Black cannot move on White's turn
+  const outOfTurn = await roomApi(store, 'POST', `/api/rooms/${code}/move`, {
+    playerToken: 'T_B_seat_token',
+    from: { r: 1, c: 4 },
+    to: { r: 3, c: 4 }
+  });
+  assert.equal(outOfTurn.status, 400);
+  assert.equal(outOfTurn.data.error, 'Not your turn');
+
+  // 3. The server derives color from the seat token, not from the body
+  const derived = await roomApi(store, 'POST', `/api/rooms/${code}/move`, { playerToken: 'T_W_seat_token', color: 'b', ...e4 });
+  assert.equal(derived.status, 200);
+  assert.equal(derived.data.move.color, 'w');
+
+  // 4. An existing explicit code cannot be overwritten by a stranger
+  const fixed = await roomApi(store, 'POST', '/api/rooms/create', { code: 'ABCD', playerToken: 'T_owner_abcd' });
+  assert.equal(fixed.status, 200);
+  await roomApi(store, 'POST', '/api/rooms/join', { code: 'ABCD', playerToken: 'T_guest_abcd' });
+  await roomApi(store, 'POST', '/api/rooms/ABCD/move', { playerToken: 'T_owner_abcd', ...e4 });
+  const hijack = await roomApi(store, 'POST', '/api/rooms/create', { code: 'ABCD', playerToken: 'T_hijacker_x' });
+  assert.equal(hijack.status, 409);
+  assert.equal((await roomApi(store, 'GET', '/api/rooms/ABCD/state')).data.room.moves.length, 1);
+  const refresh = await roomApi(store, 'POST', '/api/rooms/create', { code: 'ABCD', playerToken: 'T_owner_abcd' });
+  assert.equal(refresh.status, 200);
+  assert.equal(refresh.data.color, 'w');
+
+  // 5. A third player cannot take a seat in a full room
+  const third = await roomApi(store, 'POST', '/api/rooms/join', { code, playerToken: 'T_third_party' });
+  assert.equal(third.status, 409);
+  assert.equal(third.data.error, 'Room is full');
+
+  // 6. Reset requires a seat token
+  assert.equal((await roomApi(store, 'POST', `/api/rooms/${code}/reset`, {})).status, 403);
+  assert.equal((await roomApi(store, 'POST', `/api/rooms/${code}/reset`, { playerToken: 'T_W_seat_token' })).status, 200);
+
+  // 7. Skin ids are validated and applied to the caller's own seat
+  assert.equal(
+    (await roomApi(store, 'POST', `/api/rooms/${code}/skin`, { playerToken: 'T_B_seat_token', skinId: 'x'.repeat(100) })).status,
+    400
+  );
+  const skin = await roomApi(store, 'POST', `/api/rooms/${code}/skin`, { playerToken: 'T_B_seat_token', color: 'w', skinId: 'jade' });
+  assert.equal(skin.status, 200);
+  assert.equal(skin.data.room.blackSkin, 'jade');
+  assert.equal((await roomApi(store, 'POST', `/api/rooms/${code}/skin`, { skinId: 'jade' })).status, 403);
+
+  // 8. Out-of-board coordinates do not flip a chess room to xiangqi
+  const offBoard = await roomApi(store, 'POST', `/api/rooms/${code}/move`, {
+    playerToken: 'T_W_seat_token',
+    from: { r: 8, c: 0 },
+    to: { r: 7, c: 0 }
+  });
+  assert.equal(offBoard.status, 400);
+  assert.equal((await roomApi(store, 'GET', `/api/rooms/${code}/state`)).data.room.gameVariant, 'chess');
+
+  // 9. Joining with another variant does not switch a room that already has moves
+  await roomApi(store, 'POST', `/api/rooms/${code}/move`, { playerToken: 'T_W_seat_token', ...e4 });
+  await roomApi(store, 'POST', '/api/rooms/join', { code, playerToken: 'T_B_seat_token', gameVariant: 'xiangqi' });
+  assert.equal((await roomApi(store, 'GET', `/api/rooms/${code}/state`)).data.room.gameVariant, 'chess');
+
+  // 10. Server-generated tokens use crypto.randomUUID
+  const anon = await roomApi(store, 'POST', '/api/rooms/create', {});
+  assert.match(anon.data.playerToken, /^[0-9a-f-]{36}$/);
+
+  // 11. Move list is capped
+  const capRoom = await roomApi(store, 'POST', '/api/rooms/create', { playerToken: 'T_cap_white' });
+  const capCode = capRoom.data.code;
+  await roomApi(store, 'POST', '/api/rooms/join', { code: capCode, playerToken: 'T_cap_black' });
+  const cycle = [
+    ['T_cap_white', { r: 7, c: 6 }, { r: 5, c: 5 }],
+    ['T_cap_black', { r: 0, c: 6 }, { r: 2, c: 5 }],
+    ['T_cap_white', { r: 5, c: 5 }, { r: 7, c: 6 }],
+    ['T_cap_black', { r: 2, c: 5 }, { r: 0, c: 6 }]
+  ];
+  for (let i = 0; i < 600; i++) {
+    const [tok, from, to] = cycle[i % 4];
+    const r = await roomApi(store, 'POST', `/api/rooms/${capCode}/move`, { playerToken: tok, from, to });
+    assert.equal(r.status, 200, `move ${i + 1} must be accepted`);
+  }
+  const overCap = await roomApi(store, 'POST', `/api/rooms/${capCode}/move`, {
+    playerToken: 'T_cap_white',
+    from: { r: 7, c: 6 },
+    to: { r: 5, c: 5 }
+  });
+  assert.equal(overCap.status, 400);
+  assert.equal(overCap.data.error, 'Move limit reached');
+});
+
+test('Feedback API: routing, validation, and local fallback without sheet credentials', async () => {
+  const call = (method, body) =>
+    handleFeedbackApiRequest(
+      new Request('http://localhost/api/feedback', {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined
+      })
+    );
+
+  assert.equal(await handleFeedbackApiRequest(new Request('http://localhost/api/other')), null);
+  assert.equal((await call('OPTIONS')).status, 204);
+
+  const empty = await call('POST', { message: ' ' });
+  assert.equal(empty.status, 400);
+  assert.equal((await empty.json()).ok, false);
+
+  const posted = await call('POST', { message: 'Thêm chế độ xem lại ván', gameVariant: 'xiangqi' });
+  assert.equal(posted.status, 200);
+  const postedJson = await posted.json();
+  assert.equal(postedJson.ok, true);
+  assert.equal(postedJson.syncedToSheet, false);
+  assert.equal(postedJson.feedback.gameVariant, 'Cờ Tướng 3D (9×10)');
+
+  const listed = await (await call('GET')).json();
+  assert.equal(listed.ok, true);
+  assert.ok(listed.items.some((item) => item.id === postedJson.feedback.id));
+
+  assert.equal((await call('PUT', { message: 'x' })).status, 405);
+});
+
+test('runTweens isolates a throwing tween and keeps the others running', async () => {
+  const { runTweens } = await import('../src/tweenRunner.ts');
+  let ok2Calls = 0;
+  const ok1 = () => true;
+  const throwing = () => {
+    throw new Error('boom');
+  };
+  const ok2 = () => {
+    ok2Calls += 1;
+    return false;
+  };
+  const tweens = [ok1, throwing, ok2];
+  const errors = [];
+  runTweens(tweens, 0.016, (err) => errors.push(err));
+  assert.equal(tweens.length, 1);
+  assert.equal(tweens[0], ok2);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].message, 'boom');
+  assert.equal(ok2Calls, 1);
+});
