@@ -31,6 +31,12 @@ export interface PublicRoomState {
   updatedAt: number;
 }
 
+/** Everything needed to restore a room in another process; no listeners or derived board. */
+export interface RoomSnapshot extends PublicRoomState {
+  whiteToken: string | null;
+  blackToken: string | null;
+}
+
 interface InternalRoomEntry extends PublicRoomState {
   whiteToken: string | null;
   blackToken: string | null;
@@ -312,9 +318,36 @@ export class RoomStore {
     };
   }
 
-  private getRules(entry: InternalRoomEntry): RulesState {
-    entry.rules ??= replayRoomMoves(entry.gameVariant || 'chess', entry.moves);
+  /** Returns null when the stored moves no longer replay under the current rules. */
+  private getRules(entry: InternalRoomEntry): RulesState | null {
+    if (!entry.rules) {
+      try {
+        entry.rules = replayRoomMoves(entry.gameVariant || 'chess', entry.moves);
+      } catch {
+        return null;
+      }
+    }
     return entry.rules;
+  }
+
+  exportRoom(codeInput: string): RoomSnapshot | null {
+    const code = String(codeInput || '').trim().toUpperCase();
+    const entry = this.rooms.get(code);
+    if (!entry) return null;
+    return {
+      ...toPublicRoom(entry),
+      whiteToken: entry.whiteToken,
+      blackToken: entry.blackToken
+    };
+  }
+
+  importRoom(snapshot: RoomSnapshot): void {
+    this.rooms.set(snapshot.code, { ...snapshot, listeners: new Set(), rules: undefined });
+  }
+
+  hasListeners(codeInput: string): boolean {
+    const code = String(codeInput || '').trim().toUpperCase();
+    return (this.rooms.get(code)?.listeners.size || 0) > 0;
   }
 
   recordMove(
@@ -351,7 +384,11 @@ export class RoomStore {
     const from = { r: payload.from.r, c: payload.from.c };
     const to = { r: payload.to.r, c: payload.to.c };
     const requestedPromotion = normalizePromotion(payload.promotion);
-    const ruling = tryApplyRoomMove(this.getRules(entry), { color: moveColor, from, to, promotion: requestedPromotion });
+    const rules = this.getRules(entry);
+    if (!rules) {
+      return { ok: false as const, error: 'Room history is not replayable', room: toPublicRoom(entry) };
+    }
+    const ruling = tryApplyRoomMove(rules, { color: moveColor, from, to, promotion: requestedPromotion });
     if (!ruling.ok) {
       return { ok: false as const, error: ruling.error, room: toPublicRoom(entry) };
     }

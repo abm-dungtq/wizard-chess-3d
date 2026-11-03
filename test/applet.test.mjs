@@ -35,7 +35,7 @@ import {
   chooseBestXiangqiMoveAsync
 } from '../src/xiangqiAI.ts';
 import { wizardAudio, WizardAudioEngine } from '../src/soundEngine.ts';
-import { RoomStore, handleRoomApiRequest, handleFeedbackApiRequest } from '../src/roomStore.ts';
+import { RoomStore, generateRoomCode, handleRoomApiRequest, handleFeedbackApiRequest } from '../src/roomStore.ts';
 
 const ROOT = process.cwd();
 
@@ -889,8 +889,10 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
 
   // 1. Verify wrangler.jsonc, Duel Room Modal UI & client sync bug fixes
   assert.ok(
-    wranglerJson.includes('"main": "src/worker.ts"') && !wranglerJson.includes('new_sqlite_classes'),
-    'wrangler.jsonc must configure src/worker.ts without crashing Miniflare workerd'
+    wranglerJson.includes('"main": "src/worker.ts"') &&
+      wranglerJson.includes('"class_name": "RoomDurableObject"') &&
+      wranglerJson.includes('"new_sqlite_classes": ["RoomDurableObject"]'),
+    'wrangler.jsonc must configure src/worker.ts with the RoomDurableObject binding and its migration'
   );
   for (const duelId of [
     'btn-duel-room',
@@ -1995,6 +1997,88 @@ test('Room API rejects illegal moves for chess and xiangqi', async () => {
   // 5. Reset starts the rules over
   assert.equal((await roomApi(store, 'POST', `/api/rooms/${mate}/reset`, { playerToken: 'T_B_rules_seat' })).status, 200);
   assert.equal((await play(mate, 'w', [6, 4], [4, 4])).status, 200);
+});
+
+test('RoomStore exportRoom/importRoom round-trips a room and rebuilds rules', async () => {
+  const store = new RoomStore();
+  const created = await roomApi(store, 'POST', '/api/rooms/create', { playerToken: 'T_W_snap_seat' });
+  const code = created.data.code;
+  await roomApi(store, 'POST', '/api/rooms/join', { code, playerToken: 'T_B_snap_seat' });
+  await roomApi(store, 'POST', `/api/rooms/${code}/move`, { playerToken: 'T_W_snap_seat', from: { r: 6, c: 4 }, to: { r: 4, c: 4 } });
+
+  const snap = store.exportRoom(code);
+  assert.deepEqual(JSON.parse(JSON.stringify(snap)), snap);
+  assert.equal('listeners' in snap, false);
+  assert.equal('rules' in snap, false);
+  assert.equal(store.exportRoom('NOPE'), null);
+
+  const restored = new RoomStore();
+  restored.importRoom(snap);
+  assert.equal(restored.hasListeners(code), false);
+  const wrongSeat = await roomApi(restored, 'POST', `/api/rooms/${code}/move`, { playerToken: 'T_W_snap_seat', from: { r: 6, c: 3 }, to: { r: 4, c: 3 } });
+  assert.equal(wrongSeat.status, 400);
+  assert.equal(wrongSeat.data.error, 'Not your turn');
+  const e5 = await roomApi(restored, 'POST', `/api/rooms/${code}/move`, { playerToken: 'T_B_snap_seat', from: { r: 1, c: 4 }, to: { r: 3, c: 4 } });
+  assert.equal(e5.status, 200);
+
+  // A stored history the rules can no longer replay is reported as a JSON error, and reset recovers the room.
+  const broken = new RoomStore();
+  broken.importRoom({
+    ...snap,
+    moves: [{ seq: 1, color: 'w', from: { r: 6, c: 4 }, to: { r: 0, c: 0 }, promotion: 'queen', ts: 1 }],
+    turn: 'b'
+  });
+  const stuck = await roomApi(broken, 'POST', `/api/rooms/${code}/move`, { playerToken: 'T_B_snap_seat', from: { r: 1, c: 4 }, to: { r: 3, c: 4 } });
+  assert.equal(stuck.status, 400);
+  assert.equal(stuck.data.error, 'Room history is not replayable');
+  assert.equal((await roomApi(broken, 'POST', `/api/rooms/${code}/reset`, { playerToken: 'T_B_snap_seat' })).status, 200);
+  assert.equal((await roomApi(broken, 'POST', `/api/rooms/${code}/move`, { playerToken: 'T_W_snap_seat', from: { r: 6, c: 4 }, to: { r: 4, c: 4 } })).status, 200);
+
+  assert.match(generateRoomCode(), /^[A-Z2-9]{4}$/);
+});
+
+test('worker routes rooms to the Durable Object by code', async () => {
+  const { default: worker } = await import('../src/worker.ts');
+  const routed = [];
+  let failNext = false;
+  const env = {
+    ROOMS: {
+      idFromName: (name) => name,
+      get: (id) => ({
+        fetch: async (req) => {
+          if (failNext) throw new Error('stub down');
+          routed.push({ id, body: req.method === 'POST' ? await req.json() : null });
+          return new Response('{"ok":true}', { headers: { 'Content-Type': 'application/json' } });
+        }
+      })
+    }
+  };
+  const post = (path, body, e = env) =>
+    worker.fetch(
+      new Request(`http://localhost${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+      e
+    );
+
+  await worker.fetch(new Request('http://localhost/api/rooms/abcd/state'), env);
+  assert.equal(routed.at(-1).id, 'ABCD');
+
+  await post('/api/rooms/create', { playerToken: 'T_route_white' });
+  assert.match(routed.at(-1).id, /^[A-Z2-9]{4}$/);
+  assert.equal(routed.at(-1).body.code, routed.at(-1).id);
+
+  await post('/api/rooms/join', { code: ' wxyz ', playerToken: 'T_route_black' });
+  assert.equal(routed.at(-1).id, 'WXYZ');
+  assert.equal(routed.at(-1).body.code, 'WXYZ');
+
+  const before = routed.length;
+  const memory = await post('/api/rooms/create', { playerToken: 'T_route_memory' }, { ...env, ROOMS_BACKEND: 'memory' });
+  assert.equal(memory.status, 200);
+  assert.equal(routed.length, before);
+
+  failNext = true;
+  const down = await worker.fetch(new Request('http://localhost/api/rooms/ABCD/state'), env);
+  assert.equal(down.status, 500);
+  assert.equal((await down.json()).error, 'Room service error');
 });
 
 test('Feedback API: routing, validation, and local fallback without sheet credentials', async () => {

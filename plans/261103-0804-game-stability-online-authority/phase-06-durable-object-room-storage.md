@@ -215,3 +215,19 @@ Apply kongming's guidance, then re-run the Verify step.
 If `kongming` cannot be spawned in this environment, STOP and report the same failure evidence to the user. Never continue by self-reasoning.
 
 A failed deploy, an authentication prompt from `wrangler`, or a production smoke failure also triggers this protocol. Never retry a deploy more than once without the user's approval.
+
+## Adjustments from the phase-5 checkpoint
+
+- `recordMove` returns the JSON error `Room history is not replayable` instead of throwing when stored moves no longer replay. A thrown error became a non-JSON 500, which the client reads as "no room server" and silently switches to the offline static room. `reset` recovers such a room.
+- The DO constructor only imports the snapshot. Rules are rebuilt lazily on the next move, so a bad history cannot block the DO from loading.
+- The Worker wraps Durable Object calls in `try/catch` and answers `{ ok: false, error: 'Room service error' }` with status 500 as JSON, for the same reason.
+- Deploy commands: `npm run deploy` is correct for production. Its build rewrites `.wrangler/deploy/config.json` to point at `dist/wizard_chess_3d/wrangler.json`. A staging build writes to the same folder, so staging is always deployed with an explicit `-c`, and production is always rebuilt without `CLOUDFLARE_ENV` before deploying.
+- Rollback note: `ROOMS_BACKEND=memory` returns production to the per-isolate store, which is the broken state measured before this phase (create succeeds, the next request returns 404). It stops the Durable Object path; it is not a working fallback.
+
+## Execution notes
+
+- The staging build writes to `dist/wizard_chess_3d` too, not a separate folder. Its `wrangler.json` has name `wizard-chess-3d-staging`, `routes: []`, the DO binding, the migration and `assets.directory`.
+- Port 8787 was held by another local process, so the local Durable Object run used port 8797.
+- Local run: `E2E_BASE_URL=http://localhost:8797` online-room suite passed 7/7. A room created before a `wrangler dev` restart still returned `"ok":true` afterwards.
+- The legacy unit assertion that forbade `new_sqlite_classes` in `wrangler.jsonc` now requires the DO binding and migration.
+- Gates before commit: lint clean, unit 28/28, build OK, e2e 15 passed and 1 skipped.
