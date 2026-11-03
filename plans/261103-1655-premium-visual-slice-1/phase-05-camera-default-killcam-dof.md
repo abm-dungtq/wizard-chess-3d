@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "3/4 default camera, top-down toggle, kill-cam DOF"
-status: pending
+status: completed
 effort: 4h
 pr: PR B
 ---
@@ -128,7 +128,19 @@ Move animations themselves are not changed by Motion level in this slice. Their 
 
 ## Execution notes
 
-(fill in during execution)
+- Task 5.1-5.3: `spectator` preset, default at start-up and after a new game, `#btn-cam-spectator` added (active by default), `#btn-quick-cam` toggles `top` and `spectator`.
+- Task 5.2 tuning (NDC of the 4 corners; limit |x| <= 0.96, |y| <= 0.92):
+  - Start values: desktop chess and xiangqi pass (worst x -0.755, y -0.899). Phone 390x844 chess fails: x -1.032 (near-left corner out at the side, not top/bottom).
+  - Attempt 2, lateral offset `1.25 - tPortrait * 0.85`: phone chess x -0.961, still out. The board is too wide for portrait from an off-centre seat.
+  - Attempt 3, lateral offset `1.25 * (1 - tPortrait)` (centred on phones) and z `4.55 + tPortrait * 2.3`: all four pass. Phone chess x ±0.887, y 0.198 to -0.295; phone xiangqi x ±0.873. Desktop unchanged. Camera read back from `getState().cameraPos` matched the pose (the cathedral clamp did not move it).
+  - The plan only named top/bottom fixes; the side overflow needed the lateral offset. Only `getSpectatorPose` numbers changed.
+- Piece height gain at 1470x956, white king square e1, analytic projection of a vertical segment (no piece-mesh API exposed): `spectator` 2.6x `top` (92.6 vs 35.7 px for a 0.5 m segment). Within the 2-3x target.
+- Task 5.4: `smoothCameraTo` cuts instantly on Motion `off`; duel impact and king-fall tremors are skipped on `off`.
+- Task 5.5: kill-cam with `cinematicActive`, never touches `isAnimatingMove`. Hold 3.2 s plus 0.8 s return. Skipped by any pointerdown/keydown (capture, passive, not consumed). Ended immediately by reset, undo, variant change and skin change. Bokeh enabled only when the pass exists (ultra) with focus = distance from the tween's end position to the king.
+- Carried from the phase 4 checkpoint: the Bokeh wrapper sets `scene.background = null` during its depth render and restores it.
+- Visuals: `visuals/spectator-default.png`, `visuals/killcam-ultra-dof.png` (background blurred, king sharp).
+- e2e: 'spectator camera keeps the whole board in view' and 'kill-cam runs on checkmate, skips, and never blocks moves' pass. The quick-cam button is hidden on desktop, so the test clicks it through the DOM.
+- Phase exit check: lint OK, unit 31 pass, e2e 20 pass + 1 pre-existing skip.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.

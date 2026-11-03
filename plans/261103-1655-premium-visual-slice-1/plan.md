@@ -58,7 +58,7 @@ This plan is written for a downstream executor model. Every phase lists tasks wi
 | 2 | [Binary meshopt/KTX2 asset delivery](phase-02-binary-meshopt-ktx2-assets.md) | PR A | 5h | pending | none |
 | 3 | [Audio unlock and HRTF bus](phase-03-audio-unlock-hrtf.md) | PR A | 2h | completed | none |
 | 4 | [Tiered post-processing composer](phase-04-tiered-post-processing.md) | PR B | 4h | pending | 1 |
-| 5 | [3/4 default camera, top-down toggle, kill-cam DOF](phase-05-camera-default-killcam-dof.md) | PR B | 4h | pending | 1, 4 |
+| 5 | [3/4 default camera, top-down toggle, kill-cam DOF](phase-05-camera-default-killcam-dof.md) | PR B | 4h | completed | 1, 4 |
 | 6 | [Labels on selection and hover](phase-06-labels-selection-hover.md) | PR B | 2h | pending | 5 |
 | 7 | [Liquid Glass HUD dock](phase-07-liquid-glass-hud-dock.md) | PR B | 4h | pending | 1, 5 |
 | 8 | [Budgets and cross-device verification](phase-08-budgets-cross-device-verification.md) | PR B | 2h | pending | 1-7 |

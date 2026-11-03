@@ -398,6 +398,13 @@ export default function App() {
             🎨 Skin: Cẩm Thạch
           </button>
           <button
+            className="hud-btn active"
+            id="btn-cam-spectator"
+            title="Góc nhìn 3/4 từ phía người chơi (Bấm lần nữa để lật Trắng / Đen)"
+          >
+            🎥 Góc 3/4
+          </button>
+          <button
             className="hud-btn"
             id="btn-cam-player"
             title="Góc nhìn Người Chơi (Bấm lần nữa để lật Trắng / Đen)"
@@ -405,7 +412,7 @@ export default function App() {
             Góc 3D Chính
           </button>
           <button
-            className="hud-btn active"
+            className="hud-btn"
             id="btn-cam-top"
             title="Góc nhìn Từ Trên Xuống (Bấm lần nữa để lật Trắng / Đen)"
           >
@@ -483,9 +490,9 @@ export default function App() {
             type="button"
             className="hud-btn mobile-dock-btn active"
             id="btn-quick-cam"
-            title="Chuyển nhanh giữa Góc nhìn Từ Trên Xuống (Overhead) và Góc nhìn 3D (Player Cam)"
+            title="Chuyển nhanh giữa Góc nhìn Từ Trên Xuống và Góc nhìn 3/4"
           >
-            📐 Góc: Top
+            📐 Góc: 3D
           </button>
           <button
             type="button"

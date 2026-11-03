@@ -305,9 +305,12 @@ export function initWizardChess() {
     // The scan runs per frame because attack effects add and remove see-through meshes at any time.
     const isSeeThrough = (m) => m.transparent || m.depthWrite === false;
     const hiddenForDepth = [];
-    function skipSeeThroughObjects(pass) {
+    // clearBackground: Bokeh packs depth into colour, so the scene background colour would read as near depth.
+    function skipSeeThroughObjects(pass, clearBackground = false) {
       const render = pass.render.bind(pass);
       pass.render = (...args) => {
+        const background = scene.background;
+        if (clearBackground) scene.background = null;
         scene.traverseVisible((o) => {
           const m = o.material;
           if (m && (Array.isArray(m) ? m.some(isSeeThrough) : isSeeThrough(m))) hiddenForDepth.push(o);
@@ -318,6 +321,7 @@ export function initWizardChess() {
         } finally {
           for (const o of hiddenForDepth) o.visible = true;
           hiddenForDepth.length = 0;
+          scene.background = background;
         }
       };
       return pass;
@@ -344,7 +348,7 @@ export function initWizardChess() {
         gtao.updateGtaoMaterial({ radius: 0.25, distanceExponent: 1, thickness: 1, scale: 1, samples: 8 });
         postComposer.addPass(gtao);
         postPasses.gtao = gtao;
-        const bokeh = skipSeeThroughObjects(new BokehPass(scene, camera, { focus: 6, aperture: 0.0025, maxblur: 0.008 }));
+        const bokeh = skipSeeThroughObjects(new BokehPass(scene, camera, { focus: 6, aperture: 0.0025, maxblur: 0.008 }), true);
         bokeh.enabled = false;
         postComposer.addPass(bokeh);
         postPasses.bokeh = bokeh;
@@ -495,7 +499,8 @@ export function initWizardChess() {
     }
 
     const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.22, 65);
-    camera.position.set(0, 7.35, 3.95);
+    const startPose = getSpectatorPose('w', getPortraitFramingFactor());
+    camera.position.copy(startPose.pos);
 
     // The settings event only fires on changes, so the first build reads the tier directly.
     buildPostComposer(qualityTier);
@@ -551,7 +556,7 @@ export function initWizardChess() {
     orbitControls.minPolarAngle = 0.12;
     orbitControls.minDistance = 1.45;
     orbitControls.maxDistance = 12.0;
-    orbitControls.target.set(0, 0.78, -0.06);
+    orbitControls.target.copy(startPose.lookAt);
     orbitControls.update();
     orbitControls.enabled = !isCameraLocked;
 
@@ -560,8 +565,8 @@ export function initWizardChess() {
     function clearCameraPresetActive() {
       if (camPresetActiveCleared) return;
       if (!camPresetButtons) {
-        const found = document.querySelectorAll('#btn-cam-player, #btn-cam-wide, #btn-cam-top, #btn-cam-side');
-        if (found.length === 4) camPresetButtons = found;
+        const found = document.querySelectorAll('#btn-cam-spectator, #btn-cam-player, #btn-cam-wide, #btn-cam-top, #btn-cam-side');
+        if (found.length === 5) camPresetButtons = found;
       }
       const buttons = camPresetButtons || [];
       for (const b of buttons) b.classList.remove('active');
@@ -2266,6 +2271,7 @@ export function initWizardChess() {
     };
 
     function applyPieceTheme(themeId, sideOption = 'both') {
+      endKillCam(true);
       const theme = PIECE_THEMES[themeId] || PIECE_THEMES.hogwarts;
       currentPieceThemeId = theme.id;
       const applyMat = (mat, cfg) => {
@@ -4407,6 +4413,13 @@ export function initWizardChess() {
       const clampedPos = targetPos.clone();
       const clampedLook = targetLookAt.clone();
       enforceCathedralBoundsAndSolidColumns(clampedPos, clampedPos, clampedLook);
+      if (motionLevel === 'off') {
+        activeCamTransition = null;
+        camera.position.copy(clampedPos);
+        orbitControls.target.copy(clampedLook);
+        flushOrbitControlsDamping();
+        return;
+      }
       activeCamTransition = {
         startPos: camera.position.clone(),
         endPos: clampedPos,
@@ -4414,6 +4427,15 @@ export function initWizardChess() {
         endTarget: clampedLook,
         elapsed: 0,
         duration: Math.max(0.05, duration)
+      };
+    }
+
+    /** 3/4 view from one side's corner. Pure: called before most state exists to set the start-up camera. */
+    function getSpectatorPose(side, tPortrait) {
+      const s = side === 'b' ? -1 : 1;
+      return {
+        pos: new THREE.Vector3(s * 1.25 * (1 - tPortrait), 4.6 + tPortrait * 2.6, s * (4.55 + tPortrait * 2.3)),
+        lookAt: new THREE.Vector3(0, 0.55, s * (0.15 - tPortrait * 0.2))
       };
     }
 
@@ -5065,6 +5087,56 @@ export function initWizardChess() {
       }
     }
 
+    // Kill-cam: a skippable look at the falling king. It never sets isAnimatingMove, so moves are never blocked.
+    let cinematicActive = false;
+    let cinematicRestore = null;
+    let cinematicTimer = 0;
+    const KILL_CAM_HOLD_S = 3.2; // plus the 0.8 s return keeps the whole kill-cam within 4 s
+
+    function startKillCam(kingWorldPos, fallDir, forwardDirZ) {
+      if (motionLevel !== 'full' || heldCameraKeys.size > 0) return;
+      cinematicRestore = { pos: camera.position.clone(), target: orbitControls.target.clone() };
+      cinematicActive = true;
+      cinematicTimer = 0;
+      orbitControls.enabled = false;
+      const camPos = new THREE.Vector3(
+        kingWorldPos.x + (kingWorldPos.x >= 0 ? -1.35 : 1.35),
+        BOARD_SURFACE_Y + 1.15,
+        kingWorldPos.z + forwardDirZ * 1.45
+      );
+      smoothCameraTo(
+        camPos,
+        new THREE.Vector3(kingWorldPos.x + fallDir.x * 0.22, BOARD_SURFACE_Y + 0.18, kingWorldPos.z + fallDir.z * 0.22),
+        0.95
+      );
+      if (postPasses.bokeh) {
+        postPasses.bokeh.uniforms.focus.value = (activeCamTransition?.endPos ?? camera.position).distanceTo(kingWorldPos);
+        postPasses.bokeh.enabled = true;
+      }
+    }
+
+    function endKillCam(immediate) {
+      if (!cinematicActive) return;
+      if (postPasses.bokeh) postPasses.bokeh.enabled = false;
+      if (immediate) {
+        activeCamTransition = null;
+        camera.position.copy(cinematicRestore.pos);
+        orbitControls.target.copy(cinematicRestore.target);
+        flushOrbitControlsDamping();
+      } else {
+        smoothCameraTo(cinematicRestore.pos, cinematicRestore.target, 0.8);
+      }
+      orbitControls.enabled = !isCameraLocked;
+      cinematicActive = false;
+      cinematicRestore = null;
+    }
+    // Any click, tap or key skips the kill-cam; the event still reaches its normal handlers.
+    const skipKillCam = () => {
+      if (cinematicActive) endKillCam(true);
+    };
+    document.addEventListener('pointerdown', skipKillCam, { capture: true, passive: true });
+    document.addEventListener('keydown', skipKillCam, { capture: true, passive: true });
+
     let checkmateState = {
       active: false,
       bannerVisible: false,
@@ -5225,6 +5297,7 @@ export function initWizardChess() {
     }
 
     function undoLastMove() {
+      endKillCam(true);
       if (pendingPromotion) {
         hidePromotionModal();
         return true;
@@ -5267,6 +5340,7 @@ export function initWizardChess() {
     }
 
     function resetChessBoard(orientCamera = true, preserveScript = false) {
+      endKillCam(true);
       cancelPendingAISearch();
       hidePromotionModal();
       preMoveHighlightTask = null;
@@ -5339,9 +5413,18 @@ export function initWizardChess() {
         const viewSide = playerColor === 'b' ? 'b' : 'w';
         playerCamSide = viewSide;
         overheadCamSide = viewSide;
+        const anyCamActive = camButtons.some((id) => document.getElementById(id)?.classList.contains('active'));
         if (document.getElementById('btn-cam-player')?.classList.contains('active')) {
           setActiveCamButton('btn-cam-player');
           setCameraForSide(viewSide, false);
+        } else if (document.getElementById('btn-cam-spectator')?.classList.contains('active') || !anyCamActive) {
+          spectatorCamSide = viewSide;
+          setActiveCamButton('btn-cam-spectator');
+          const pose = getSpectatorPose(viewSide, getPortraitFramingFactor());
+          activeCamTransition = null;
+          camera.position.copy(pose.pos);
+          orbitControls.target.copy(pose.lookAt);
+          flushOrbitControlsDamping();
         } else {
           setActiveCamButton('btn-cam-top');
           setOverheadCameraForSide(viewSide, false);
@@ -7389,7 +7472,7 @@ export function initWizardChess() {
 
             // Piece-scaled impact camera tremor right when the blow shatters the defender (only when combatCameraZoomEnabled is explicitly opted in)
             const shakeSpan = piece.type === 'rook' || piece.type === 'king' || piece.type === 'cannon' ? 0.34 : 0.26;
-            if (activeDuelCamSwoop && shatterTriggered && elapsed >= impactActualTime && elapsed <= impactActualTime + shakeSpan) {
+            if (activeDuelCamSwoop && motionLevel !== 'off' && shatterTriggered && elapsed >= impactActualTime && elapsed <= impactActualTime + shakeSpan) {
               const shakeProgress = (elapsed - impactActualTime) / shakeSpan;
               const decay = (1 - shakeProgress) * (1 - shakeProgress);
               const baseAmp = piece.type === 'rook' || piece.type === 'cannon' ? 0.046 : piece.type === 'king' ? 0.042 : 0.026;
@@ -8379,6 +8462,8 @@ export function initWizardChess() {
           ),
           0.95
         );
+      } else {
+        startKillCam(homePos, { x: fallDirX, z: fallDirZ }, forwardDirZ);
       }
 
       const RIM_RADIUS = 0.135;    // Pedestal bottom rim radius so the lower edge stays grounded on the board
@@ -8453,7 +8538,7 @@ export function initWizardChess() {
           applyKingTopplePose(theta, 0);
 
           // Subtle damped camera tremor when the heavy stone King crashes onto the altar board (only when combatCameraZoomEnabled is opted in)
-          if (combatCameraZoomEnabled && elapsed <= tImpact + 0.28) {
+          if (combatCameraZoomEnabled && motionLevel !== 'off' && elapsed <= tImpact + 0.28) {
             const sProg = (elapsed - tImpact) / 0.28;
             const decay = (1 - sProg) * (1 - sProg);
             camera.position.y += Math.cos(sProg * Math.PI * 8) * 0.022 * decay;
@@ -9578,6 +9663,7 @@ export function initWizardChess() {
     // Camera Presets & HUD Controls
     // =========================================================================
     const camButtons = [
+      'btn-cam-spectator',
       'btn-cam-player',
       'btn-cam-top',
       'btn-cam-side',
@@ -9592,15 +9678,32 @@ export function initWizardChess() {
       }
       const btnQuickCam = document.getElementById('btn-quick-cam');
       if (btnQuickCam) {
-        btnQuickCam.classList.toggle('active', activeId === 'btn-cam-player' || activeId === 'btn-cam-top');
+        btnQuickCam.classList.toggle('active', activeId === 'btn-cam-spectator' || activeId === 'btn-cam-top');
         btnQuickCam.textContent = activeId === 'btn-cam-top' ? '📐 Góc: Top' : '📐 Góc: 3D';
       }
     }
 
     let playerCamSide = 'w';     // toggles 'w' (White) <-> 'b' (Black) on repeat click of Player Cam
+    let spectatorCamSide = 'w';  // toggles 'w' (White) <-> 'b' (Black) on repeat click of the 3/4 view
     let overheadCamSide = 'w';   // toggles 'w' (White) <-> 'b' (Black) on repeat click of Overhead
     let sideCamSide = 'east';    // toggles 'east' (+X) <-> 'west' (-X) on repeat click of Side
     let cathedralWideSide = 'north'; // toggles 'north' (Rose Window) <-> 'south' (Narthex Triptych) on repeat click of Cathedral
+
+    /** Screen positions (NDC) of the four outer corners of the board top surface. */
+    function projectBoardCorners() {
+      const halfW = (getBoardCols() * getActiveSqSize()) / 2;
+      const halfD = (getBoardRows() * getActiveSqSize()) / 2;
+      camera.updateMatrixWorld();
+      return [
+        [-halfW, -halfD],
+        [halfW, -halfD],
+        [-halfW, halfD],
+        [halfW, halfD]
+      ].map(([x, z]) => {
+        const v = new THREE.Vector3(x, BOARD_SURFACE_Y, z).project(camera);
+        return [Number(v.x.toFixed(3)), Number(v.y.toFixed(3))];
+      });
+    }
 
     function setCameraPose(posArr, targetArr) {
       activeCamTransition = null;
@@ -9629,6 +9732,16 @@ export function initWizardChess() {
         }
         setActiveCamButton('btn-cam-player');
         setCameraForSide(playerCamSide, false);
+      } else if (preset === 'spectator') {
+        const wasSpectatorActive = document.getElementById('btn-cam-spectator')?.classList.contains('active');
+        if (wasSpectatorActive) {
+          spectatorCamSide = spectatorCamSide === 'w' ? 'b' : 'w';
+        } else {
+          spectatorCamSide = playerColor === 'b' ? 'b' : 'w';
+        }
+        setActiveCamButton('btn-cam-spectator');
+        const pose = getSpectatorPose(spectatorCamSide, tPortrait);
+        smoothCameraTo(pose.pos, pose.lookAt, 0.75);
       } else if (preset === 'top') {
         const wasTopActive = document.getElementById('btn-cam-top')?.classList.contains('active');
         if (wasTopActive) {
@@ -9743,9 +9856,10 @@ export function initWizardChess() {
     document.getElementById('btn-quick-cam')?.addEventListener('click', () => {
       const isTopActive = document.getElementById('btn-cam-top')?.classList.contains('active');
       if (isTopActive) {
-        playerCamSide = gameMode === 'multi' ? playerColor : isPassAndPlay ? currentTurn : playerColor;
-        setActiveCamButton('btn-cam-player');
-        setCameraForSide(playerCamSide, false);
+        spectatorCamSide = gameMode === 'multi' ? playerColor : isPassAndPlay ? currentTurn : playerColor;
+        setActiveCamButton('btn-cam-spectator');
+        const pose = getSpectatorPose(spectatorCamSide, syncResponsiveCameraFov());
+        smoothCameraTo(pose.pos, pose.lookAt, 0.75);
       } else {
         overheadCamSide = gameMode === 'multi' ? playerColor : isPassAndPlay ? currentTurn : playerColor;
         setActiveCamButton('btn-cam-top');
@@ -9772,6 +9886,7 @@ export function initWizardChess() {
     });
     window.wizardSetPieceSkin = applyPieceTheme;
     window.wizardCyclePieceSkin = cyclePieceTheme;
+    document.getElementById('btn-cam-spectator')?.addEventListener('click', () => setCameraPreset('spectator'));
     document.getElementById('btn-cam-player')?.addEventListener('click', () => setCameraPreset('player'));
     document.getElementById('btn-cam-top')?.addEventListener('click', () => setCameraPreset('top'));
     document.getElementById('btn-cam-side')?.addEventListener('click', () => setCameraPreset('side'));
@@ -9990,6 +10105,7 @@ export function initWizardChess() {
     }
 
     function setGameVariant(nextVariant) {
+      endKillCam(true);
       const normalized = nextVariant === 'xiangqi' ? 'xiangqi' : 'chess';
       if (typeof document !== 'undefined' && document.body) {
         document.body.dataset.gameVariant = normalized;
@@ -10646,10 +10762,14 @@ export function initWizardChess() {
         isAnimatingMove,
         gameOver,
         checkmateState: { ...checkmateState },
+        cinematicActive,
+        killCamDof: Boolean(postPasses.bokeh?.enabled),
         capturedByWhite,
         capturedByBlack,
         cameraPos: camera.position.toArray(),
         cameraTarget: orbitControls.target.toArray(),
+        boardCornerNdc: projectBoardCorners(),
+        boardCornersInView: projectBoardCorners().every(([x, y]) => Math.abs(x) <= 0.96 && Math.abs(y) <= 0.92),
         cameraFov: camera.fov,
         portraitFramingFactor: Number(getPortraitFramingFactor().toFixed(3)),
         playerCamSide,
@@ -10849,6 +10969,10 @@ export function initWizardChess() {
     const _audioForward = new THREE.Vector3();
     function stepScene(dt, doRender = true) {
       elapsedTotal += dt;
+      if (cinematicActive) {
+        cinematicTimer += dt;
+        if (cinematicTimer >= KILL_CAM_HOLD_S) endKillCam(false);
+      }
       const prevCamPos = _prevCamPos.copy(camera.position);
       // The listener trails the camera by one frame, which is inaudible; it is a no-op until audio runs.
       wizardAudio.setListener(camera.position, camera.getWorldDirection(_audioForward), camera.up);
@@ -11356,6 +11480,12 @@ export function initWizardChess() {
       if (!isAnimatingMove) {
         if (document.getElementById('btn-cam-player')?.classList.contains('active')) {
           setCameraForSide(playerCamSide, true);
+        } else if (document.getElementById('btn-cam-spectator')?.classList.contains('active')) {
+          const pose = getSpectatorPose(spectatorCamSide, getPortraitFramingFactor());
+          activeCamTransition = null;
+          camera.position.copy(pose.pos);
+          orbitControls.target.copy(pose.lookAt);
+          flushOrbitControlsDamping();
         } else if (document.getElementById('btn-cam-top')?.classList.contains('active')) {
           const tPortrait = getPortraitFramingFactor();
           const zSign = overheadCamSide === 'b' ? -1 : 1;

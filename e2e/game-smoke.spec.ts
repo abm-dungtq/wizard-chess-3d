@@ -215,4 +215,70 @@ test.describe('single-player smoke', () => {
     await page.evaluate(() => localStorage.removeItem('wizard_chess_settings_v1'));
     expect(errors).toEqual([]);
   });
+  test('spectator camera keeps the whole board in view', async ({ page }) => {
+    test.setTimeout(180_000);
+    const errors = collectConsoleErrors(page);
+    await page.setViewportSize({ width: 1470, height: 956 });
+    await openGame(page);
+    await expect(page.locator('#btn-cam-spectator')).toHaveClass(/active/);
+    expect((await getState(page)).boardCornersInView).toBe(true);
+    // The quick-cam button lives in the mobile dock and is hidden on desktop.
+    await page.evaluate(() => (document.getElementById('btn-quick-cam') as HTMLButtonElement).click());
+    await expect(page.locator('#btn-cam-top')).toHaveClass(/active/);
+    await page.evaluate(() => (document.getElementById('btn-quick-cam') as HTMLButtonElement).click());
+    await expect(page.locator('#btn-cam-spectator')).toHaveClass(/active/);
+
+    for (const size of [{ width: 1470, height: 956 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(size);
+      for (const variant of ['chess', 'xiangqi']) {
+        await page.evaluate((v) => (window as any).wizardChess.setGameVariant(v), variant);
+        await waitForState(page, `s.boardCols === ${variant === 'xiangqi' ? 9 : 8}`, 30_000);
+        await waitIdle(page);
+        await page.evaluate(() => {
+          const w = (window as any).wizardChess;
+          if (!document.getElementById('btn-cam-spectator')?.classList.contains('active')) w.setCameraPreset('spectator');
+        });
+        await page.waitForTimeout(900);
+        const s = await getState(page);
+        expect(s.boardCornersInView, `${variant} ${size.width}x${size.height} ${JSON.stringify(s.boardCornerNdc)}`).toBe(true);
+      }
+    }
+    expect(errors).toEqual([]);
+  });
+  test('kill-cam runs on checkmate, skips, and never blocks moves', async ({ page }) => {
+    test.setTimeout(120_000);
+    const errors = collectConsoleErrors(page);
+    await openGame(page);
+    await waitIdle(page);
+    await page.evaluate(() => {
+      const w = (window as any).wizardChess;
+      w.setMotionLevel('full');
+      w.setQualityTier('ultra');
+      w.triggerCheckmateSequence('b', 'w');
+    });
+    await waitForState(page, 's.cinematicActive === true', 500);
+    let s = await getState(page);
+    expect(s.killCamDof).toBe(true);
+    expect(s.isAnimatingMove).toBe(false);
+
+    await page.mouse.click(5, 5);
+    await waitForState(page, 's.cinematicActive === false && s.killCamDof === false', 1_200);
+
+    await page.evaluate(() => (window as any).wizardChess.triggerCheckmateSequence('b', 'w'));
+    await waitForState(page, 's.cinematicActive === true', 500);
+    await waitForState(page, 's.cinematicActive === false', 4_500);
+
+    await page.evaluate(() => {
+      const w = (window as any).wizardChess;
+      w.setMotionLevel('off');
+      w.triggerCheckmateSequence('b', 'w');
+    });
+    for (let i = 0; i < 10; i++) {
+      s = await getState(page);
+      expect(s.cinematicActive).toBe(false);
+      await page.waitForTimeout(100);
+    }
+    await page.evaluate(() => (window as any).wizardChess.setQualityTier('auto'));
+    expect(errors).toEqual([]);
+  });
 });
