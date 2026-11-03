@@ -287,6 +287,9 @@ export function initWizardChess() {
     }
     function disposePostComposer() {
       if (!postComposer) return;
+      // GTAOPass.dispose() leaves these two materials behind.
+      postPasses.gtao?.gtaoMaterial?.dispose();
+      postPasses.gtao?.blendMaterial?.dispose();
       for (const pass of postComposer.passes) pass.dispose?.();
       if (typeof postComposer.dispose === 'function') {
         postComposer.dispose();
@@ -349,8 +352,9 @@ export function initWizardChess() {
       const bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.45, 0.88);
       postComposer.addPass(bloom);
       postPasses.bloom = bloom;
-      postComposer.addPass(new SMAAPass(size.x, size.y));
       postComposer.addPass(new OutputPass());
+      // SMAA expects tone-mapped sRGB input: its edge threshold and gamma-corrected blend assume display values.
+      postComposer.addPass(new SMAAPass(size.x, size.y));
       resizePostComposer();
     }
 
