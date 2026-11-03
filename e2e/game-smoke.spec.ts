@@ -153,9 +153,12 @@ test.describe('single-player smoke', () => {
     // A HUD element, not the canvas: the document-level listener must catch it.
     await page.click('.brand-pill');
     await waitForState(page, "s.audioState.contextState === 'running'", 5_000);
+    const playsBefore = (await getState(page)).audioState.playCount;
     await page.evaluate(() => (window as any).wizardChess.executeChessMove(6, 4, 4, 4));
     await waitIdle(page);
-    expect((await getState(page)).audioState.contextState).toBe('running');
+    const after = (await getState(page)).audioState;
+    expect(after.contextState).toBe('running');
+    expect(after.playCount).toBeGreaterThan(playsBefore);
     expect(errors).toEqual([]);
   });
 

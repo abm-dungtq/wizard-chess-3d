@@ -254,6 +254,20 @@ export function initWizardChess() {
     renderer.toneMappingExposure = 1.24;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+    // Every frame goes through renderFrame and every size change through applyRendererSize, so the
+    // post-processing composer (present on the high and ultra tiers) can never fall out of step.
+    let postComposer = null;
+    function renderFrame(dt = 0) {
+      if (postComposer) postComposer.render(dt);
+      else renderer.render(scene, camera);
+    }
+    function applyRendererSize() {
+      renderer.setPixelRatio(currentActiveDpr);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      if (postComposer) resizePostComposer();
+    }
+    function resizePostComposer() {}
+
     // Motion level and quality tier: saved choices win over the OS setting and device detection.
     function readGpuRendererString() {
       try {
@@ -344,7 +358,7 @@ export function initWizardChess() {
           }
         });
         renderer.shadowMap.needsUpdate = true;
-        renderer.render(scene, camera);
+        renderFrame();
       },
       false
     );
@@ -9900,7 +9914,7 @@ export function initWizardChess() {
       syncGameSelectorUI();
       closeGameSelectorModal();
       renderer.shadowMap.needsUpdate = true;
-      renderer.render(scene, camera);
+      renderFrame();
       return gameVariant;
     }
 
@@ -10084,9 +10098,10 @@ export function initWizardChess() {
       const centerPos = new THREE.Vector3(0, BOARD_SURFACE_Y + 0.14, 0);
       spawnStoneShatter(centerPos, 'w', 'queen');
       spawnSignatureCombatVFX('queen', 'finisher', centerPos, centerPos, 0, -1, 'w');
-      wizardAudio.playStoneShatter();
-      wizardAudio.playSignatureAttack('queen', 'finisher');
-      renderer.render(scene, camera);
+      const centerAt = { x: 0, y: BOARD_SURFACE_Y, z: 0 };
+      wizardAudio.playStoneShatter(centerAt);
+      wizardAudio.playSignatureAttack('queen', 'finisher', centerAt);
+      renderFrame();
     }
 
     function syncSkinBoutiqueUI() {
@@ -10147,7 +10162,7 @@ export function initWizardChess() {
         applyPieceTheme(skinId, targetSide);
       }
       syncSkinBoutiqueUI();
-      renderer.render(scene, camera);
+      renderFrame();
     }
 
     function openSkinShopModal() {
@@ -10412,7 +10427,7 @@ export function initWizardChess() {
           enforceCathedralBoundsAndSolidColumns(prev, camera.position, orbitControls.target);
           path.push(camera.position.toArray().map((v) => Number(v.toFixed(3))));
         }
-        renderer.render(scene, camera);
+        renderFrame();
         return path;
       },
       setSinglePlayerSide: (color) => {
@@ -10456,7 +10471,7 @@ export function initWizardChess() {
             : computePositionHash(extractPureBoard(boardState), currentTurn, enPassantTarget)
         ];
         updateTurnUI();
-        renderer.render(scene, camera);
+        renderFrame();
       },
       triggerDemoCapture: () => {
         // Set up an immediate pawn capture (e4 x d5) and execute it
@@ -10574,7 +10589,7 @@ export function initWizardChess() {
         telemetry: cameraTelemetry
       }),
       captureScreenshot: async (filename) => {
-        renderer.render(scene, camera);
+        renderFrame();
         const outCanvas = document.createElement('canvas');
         outCanvas.width = renderer.domElement.width;
         outCanvas.height = renderer.domElement.height;
@@ -10710,7 +10725,7 @@ export function initWizardChess() {
       for (let i = 0; i < steps; i++) {
         stepScene(subDt, false);
       }
-      renderer.render(scene, camera);
+      renderFrame();
       updatePieceOverheadOverlay();
     };
 
@@ -11061,7 +11076,7 @@ export function initWizardChess() {
       }
 
       if (doRender && !isWebGLContextLost) {
-        renderer.render(scene, camera);
+        renderFrame(dt);
         updatePieceOverheadOverlay();
       }
     }
@@ -11100,8 +11115,7 @@ export function initWizardChess() {
             currentActiveDpr = 1.35;
             highFrameTimeStreak = 0;
             lastDprAdjustTime = elapsedTotal;
-            renderer.setPixelRatio(currentActiveDpr);
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            applyRendererSize();
           }
         } else {
           highFrameTimeStreak = 0;
@@ -11111,8 +11125,7 @@ export function initWizardChess() {
               currentActiveDpr = targetMobileRetinaDpr;
               lowFrameTimeStreak = 0;
               lastDprAdjustTime = elapsedTotal;
-              renderer.setPixelRatio(currentActiveDpr);
-              renderer.setSize(window.innerWidth, window.innerHeight);
+              applyRendererSize();
             }
           } else {
             lowFrameTimeStreak = 0;
@@ -11131,8 +11144,7 @@ export function initWizardChess() {
           currentActiveDpr = 1.0;
           highFrameTimeStreak = 0;
           lastDprAdjustTime = elapsedTotal;
-          renderer.setPixelRatio(currentActiveDpr);
-          renderer.setSize(window.innerWidth, window.innerHeight);
+          applyRendererSize();
         }
       } else {
         highFrameTimeStreak = 0;
@@ -11142,8 +11154,7 @@ export function initWizardChess() {
             currentActiveDpr = maxTargetDpr;
             lowFrameTimeStreak = 0;
             lastDprAdjustTime = elapsedTotal;
-            renderer.setPixelRatio(currentActiveDpr);
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            applyRendererSize();
           }
         } else {
           lowFrameTimeStreak = 0;
@@ -11192,12 +11203,11 @@ export function initWizardChess() {
       );
       if (isMobileNow) {
         currentActiveDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 2.0);
-        renderer.setPixelRatio(currentActiveDpr);
       }
       camera.aspect = window.innerWidth / window.innerHeight;
       syncResponsiveCameraFov();
       camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      applyRendererSize();
       if (!isAnimatingMove) {
         if (document.getElementById('btn-cam-player')?.classList.contains('active')) {
           setCameraForSide(playerCamSide, true);
@@ -11210,7 +11220,7 @@ export function initWizardChess() {
         }
       }
       if (!isWebGLContextLost) {
-        renderer.render(scene, camera);
+        renderFrame();
         updatePieceOverheadOverlay();
       }
     }
@@ -11277,7 +11287,7 @@ export function initWizardChess() {
           }
         }
         renderer.shadowMap.needsUpdate = true;
-        renderer.render(scene, camera);
+        renderFrame();
         clock.getDelta();
         if (!manualStepMode) {
           animate();

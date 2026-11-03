@@ -12,12 +12,13 @@ export interface AudioPoint {
   z: number;
 }
 
-/** How long the longest positioned cue rings, so its panner can be released afterwards. */
+/** Positioned cues end within ~0.7 s; their panner is released after this, with margin. */
 const PANNER_RELEASE_MS = 1500;
 
 export class WizardAudioEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  private lastListener = new Float64Array(9).fill(NaN);
   private slideNoiseBuf: AudioBuffer | null = null;
   private shatterNoiseBuf: AudioBuffer | null = null;
   private muted = false;
@@ -38,7 +39,8 @@ export class WizardAudioEngine {
         return null;
       }
     }
-    if (this.ctx.state === 'suspended') {
+    // Safari also reports 'interrupted' after a call or app switch; resume from any non-running state.
+    if (this.ctx.state !== 'running') {
       this.ctx.resume().catch(() => {});
     }
     return this.ctx;
@@ -48,6 +50,7 @@ export class WizardAudioEngine {
   public unlock(): boolean {
     const ctx = this.ensureContext();
     if (!ctx) return false;
+    if (ctx.state === 'running') return true;
     try {
       // iOS Safari only unlocks audio once a source starts inside the gesture.
       const silent = ctx.createBufferSource();
@@ -57,6 +60,10 @@ export class WizardAudioEngine {
     } catch {}
     this.getSlideNoiseBuffer(ctx);
     this.getShatterNoiseBuffer(ctx);
+    try {
+      // The first HRTF panner loads the HRTF data; doing it here keeps the first positioned hit from playing dry.
+      ctx.createPanner().panningModel = 'HRTF';
+    } catch {}
     ctx.resume().catch(() => {});
     return true;
   }
@@ -93,10 +100,26 @@ export class WizardAudioEngine {
     }
   }
 
+  /** Stores one point of the listener pose; returns 1 when it moved. */
+  private storeListenerPoint(offset: number, p: AudioPoint): number {
+    const last = this.lastListener;
+    const moved =
+      !(Math.abs(p.x - last[offset]) < 1e-4) ||
+      !(Math.abs(p.y - last[offset + 1]) < 1e-4) ||
+      !(Math.abs(p.z - last[offset + 2]) < 1e-4);
+    last[offset] = p.x;
+    last[offset + 1] = p.y;
+    last[offset + 2] = p.z;
+    return moved ? 1 : 0;
+  }
+
   /** Keeps the listener on the camera so positioned cues come from the right side of the board. */
   public setListener(pos: AudioPoint, forward: AudioPoint, up: AudioPoint): void {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;
+    // A still camera writes nothing, so the listener's AudioParam timeline stays empty.
+    const moved = this.storeListenerPoint(0, pos) | this.storeListenerPoint(3, forward) | this.storeListenerPoint(6, up);
+    if (!moved) return;
     const l = ctx.listener;
     if (l.positionX) {
       l.positionX.value = pos.x;

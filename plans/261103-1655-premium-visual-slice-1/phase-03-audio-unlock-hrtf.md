@@ -105,6 +105,7 @@ Task 3.1 proves the stall exists and where it comes from before anything is chan
 - The per-frame listener update calls `setListener` directly (it returns early until the context runs) instead of reading `getState()`, so no object is allocated per frame.
 - Each positioned cue gets its own panner, disconnected after 1.5 s.
 - Phase exit: lint, 31 unit tests, e2e 17 passed + 1 pre-existing skip.
+- Checkpoint (GO-WITH-FIXES) applied: the e2e test also asserts `playCount` rises after the move; the context resumes from any non-running state (Safari's `interrupted`); `unlock()` returns early once running and creates one HRTF panner up front so the HRTF data is loaded before the first hit; `setListener` skips the writes when the camera has not moved; the skin-preview shatter plays at the board centre. Re-run: lint, 31 unit, e2e all passed.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.
