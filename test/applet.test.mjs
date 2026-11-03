@@ -1353,8 +1353,9 @@ test('Mobile Gameplay Optimization Contract: Portrait Frustum-Fit Camera, Anti-O
     engineJs.includes('function getPortraitFramingFactor()') &&
       engineJs.includes('function syncResponsiveCameraFov()') &&
       engineJs.includes('function handleViewportResize()') &&
-      engineJs.includes("window.visualViewport?.addEventListener('resize', handleViewportResize)"),
-    'Engine must implement getPortraitFramingFactor, syncResponsiveCameraFov, and handleViewportResize'
+      engineJs.includes("window.visualViewport?.addEventListener('resize', scheduleViewportResize)") &&
+      engineJs.includes('function scheduleViewportResize()'),
+    'Engine must implement getPortraitFramingFactor, syncResponsiveCameraFov, and a rAF-coalesced handleViewportResize'
   );
 
   // 4. Two-Stage Anti-Occlusion Ray Piercing, Magnetic Touch Assist & Web Audio Gesture Unlock
@@ -1949,4 +1950,25 @@ test('Feedback API: routing, validation, and local fallback without sheet creden
   assert.ok(listed.items.some((item) => item.id === postedJson.feedback.id));
 
   assert.equal((await call('PUT', { message: 'x' })).status, 405);
+});
+
+test('runTweens isolates a throwing tween and keeps the others running', async () => {
+  const { runTweens } = await import('../src/tweenRunner.ts');
+  let ok2Calls = 0;
+  const ok1 = () => true;
+  const throwing = () => {
+    throw new Error('boom');
+  };
+  const ok2 = () => {
+    ok2Calls += 1;
+    return false;
+  };
+  const tweens = [ok1, throwing, ok2];
+  const errors = [];
+  runTweens(tweens, 0.016, (err) => errors.push(err));
+  assert.equal(tweens.length, 1);
+  assert.equal(tweens[0], ok2);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].message, 'boom');
+  assert.equal(ok2Calls, 1);
 });

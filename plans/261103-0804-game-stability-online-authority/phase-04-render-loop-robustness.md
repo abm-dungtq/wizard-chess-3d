@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Render loop robustness and smoothness"
-status: pending
+status: completed
 effort: 3h
 pr: PR 1
 ---
@@ -234,3 +234,25 @@ If `kongming` cannot be spawned in this environment, STOP and report the same fa
 ## PR 1 boundary
 
 After this phase, open PR 1 against `main` with phases 1-4. Opening the PR is outward-facing, so ask the user in chat first. Wait for CI and review before starting phase 5.
+
+## Adjustments from the phase-3 checkpoint (GO)
+
+- **A. `resyncFromRoomMoves` stops on failure.** If `executeChessMove` returns `false`, or `isAnimatingMove` is still true after `completeCurrentMoveImmediately`, log with `console.error`, stop the loop, leave `appliedMoveSeq` at the last applied `seq`, and return `false`. This also covers a server list that has moves after checkmate (no server legality check until phase 5).
+- **B. `recoverFromDroppedMoveTween` (Task 4.2).** Decrement `multiPlyCount` when it pops `moveHistory`, matching the other pop sites. Rate-limit its resync: `resyncFromRoomMoves` sets `lastResyncAt`, and recovery resyncs only if the last resync was more than about 2 s ago. Without this, a tween that throws during replay rebuilds the board every frame.
+- **C. Watchdog (Task 4.2).** When `isAnimatingMove` is true with no tweens and no `preMoveHighlightTask` for 90 frames, call `recoverFromDroppedMoveTween()` instead of only clearing the flag. A phantom history entry and a stale turn would otherwise remain.
+- **D. Xiangqi variant-switch wait (Task 4.5, same load path).** The drain's `room.gameVariant !== gameVariant` wait does nothing, because `gameVariant` is assigned before the models load. Add `let variantSwitchPending = false;`. In `applyRemoteRoomState`, at the start of a switch, bump `remoteSyncSession`, set `remoteDrainActive = false` and `variantSwitchPending = true`. In the `.then`, run `resetChessBoard(false); appliedMoveSeq = 0; variantSwitchPending = false;`, then drain `latestRemoteRoom` if set. The drain waits on `isAnimatingMove || variantSwitchPending`, and `resyncFromRoomMoves` returns early while a switch is pending. Add an e2e test: B joins a xiangqi room that already has one move, with xiangqi GLB requests delayed by about 1.5 s. Expect `moveHistoryCount === 1` and no second resync warning.
+- **Do not** call `resetChessBoard` or `resyncFromRoomMoves` from inside a tween or from `reportTweenError`. Do not add a `gameOver` check to the drain.
+- **PR body gaps:**
+  - "Room not found" leaves a dead multiplayer session.
+  - The `#duel-status-msg` rewrite hides a rejection message within 1.5 s.
+  - A resync replays audio and leaves debris spam.
+  - The AI `maxSliceMs < 14.0` test flakes under coverage.
+  - The first move before any pointer gesture pays a one-time 250-450 ms `new AudioContext()` in `soundEngine.ts` `ensureContext`. This was already on HEAD before phase 4. Real paths: `?side=b`, where the AI moves first, and a joiner whose opponent moves before the joiner clicks. Follow-up fix: pre-create the AudioContext at idle after the loading overlay hides, and leave it suspended until the existing pointerdown unlock.
+  - If a xiangqi room is joined while the 5 s load backoff is active, the board is built with fallback meshes and nothing triggers a reload. Game logic stays correct; only the visuals are stale.
+
+## Execution notes
+
+- `recoverFromDroppedMoveTween` returns early unless a move is animating. A dropped non-move tween, such as the king fall after checkmate, therefore never rolls back a finished ply. In multiplayer, when the resync is rate-limited, `appliedMoveSeq` drops to `multiPlyCount` so the next room update replays the rolled-back ply.
+- Xiangqi models preload during startup. Both xiangqi e2e tests install their asset route before the page loads. The join test fails the preload, waits out the backoff, and then serves models with a 1.5 s delay. It asserts only after all 7 models are served, and it probes real board squares: (9,4) is the king and (0,8) is a rook. `boardCols` follows the variant flag, so it cannot tell the boards apart. Against the original variant handling the test fails (B's move is lost); with the fix it passes.
+- The resize source-string contract in `test/applet.test.mjs` now expects `scheduleViewportResize`.
+- Frame check (Task 4.6) used headless Chromium with the harness GPU flags, 1024x768 viewport, DPR 1, at 60 Hz vsync. After a pointer gesture: idle p95 16.8 ms and max 16.8 ms; move p95 16.8 ms and max 16.8 ms. Without a gesture, the first move shows the pre-existing AudioContext spike: 183 ms on HEAD, 233-317 ms with phase 4. The audit baseline was idle p95 10.8 ms and move max 20 ms, measured in the desktop browser pane.

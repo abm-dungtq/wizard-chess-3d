@@ -76,6 +76,72 @@ test.describe('single-player smoke', () => {
     expect(errors).toEqual([]);
   });
 
+  test('faulty tween does not freeze the game', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await openGame(page);
+    await page.evaluate(() => {
+      const w = (window as any).wizardChess;
+      w.executeChessMove(6, 4, 4, 4);
+      w.injectFaultyTweenForTest();
+    });
+    await waitIdle(page);
+    const s = await getState(page);
+    if (s.currentTurn === 'w') {
+      await page.evaluate(() => (window as any).wizardChess.executeChessMove(6, 3, 4, 3));
+      await waitIdle(page);
+    }
+    const after = await getState(page);
+    expect(after.aiSearchInFlight).toBe(false);
+    expect(after.isAnimatingMove).toBe(false);
+    expect(after.moveHistoryCount).toBeGreaterThanOrEqual(1);
+    const frames = await page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          let count = 0;
+          const end = performance.now() + 1000;
+          const tick = (now: number) => {
+            count += 1;
+            if (now < end) requestAnimationFrame(tick);
+            else resolve(count);
+          };
+          requestAnimationFrame(tick);
+        })
+    );
+    expect(frames).toBeGreaterThan(20);
+    expect(errors.filter((e) => !e.includes('Move tween failed; dropped'))).toEqual([]);
+  });
+
+  test('a burst of resize events settles to the window size', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await openGame(page);
+    await page.setViewportSize({ width: 900, height: 700 });
+    const sizes = await page.evaluate(async () => {
+      for (let i = 0; i < 50; i++) window.dispatchEvent(new Event('resize'));
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return { canvas: document.querySelector('canvas')!.clientWidth, window: window.innerWidth };
+    });
+    expect(sizes.canvas).toBe(sizes.window);
+    expect(errors).toEqual([]);
+  });
+
+  test('a failed xiangqi model load does not refetch in a storm', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    // Xiangqi models preload at startup, so the failure must be in place before the page loads.
+    let requests = 0;
+    await page.route('**/assets/glb/xiangqi/**', (route) => {
+      requests += 1;
+      return route.abort();
+    });
+    await openGame(page);
+    expect(requests).toBeGreaterThan(0);
+    const beforeSwitch = requests;
+    await page.evaluate(() => (window as any).wizardChess.setGameVariant('xiangqi'));
+    await page.waitForTimeout(3000);
+    expect(requests - beforeSwitch).toBeLessThanOrEqual(28);
+    // Aborted fetches surface as resource-load errors; anything else is a real failure.
+    expect(errors.filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
+  });
+
   test('real canvas click selects a piece', async () => {
     test.skip(true, 'Engine exposes no world-to-screen helper; pointer picking is covered by unit raycast tests');
   });

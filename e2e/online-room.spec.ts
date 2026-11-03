@@ -1,13 +1,17 @@
 import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { collectConsoleErrors, getState, openGame, waitForState } from './helpers';
+import { collectConsoleErrors, getState, openGame, waitForState, waitIdle } from './helpers';
 
 const openContexts: BrowserContext[] = [];
 
-async function openPlayer(browser: Browser): Promise<{ page: Page; errors: string[] }> {
+async function openPlayer(
+  browser: Browser,
+  beforeLoad?: (page: Page) => Promise<void>
+): Promise<{ page: Page; errors: string[] }> {
   const context = await browser.newContext();
   openContexts.push(context);
   const page = await context.newPage();
   const errors = collectConsoleErrors(page);
+  if (beforeLoad) await beforeLoad(page);
   await openGame(page);
   return { page, errors };
 }
@@ -120,6 +124,50 @@ test.describe('online room', () => {
     expect((await a.page.evaluate(() => (window as any).wizardChess.inspectSquare(6, 3))).type).toBe('pawn');
     expect((await a.page.evaluate(() => (window as any).wizardChess.inspectSquare(4, 4))).type).toBe('pawn');
     expect((await getState(a.page)).currentTurn).toBe('b');
+  });
+
+  test('joining a xiangqi room with moves waits for the models before replaying', async ({ browser }) => {
+    const a = await openPlayer(browser);
+    await a.page.evaluate(() => (window as any).wizardChess.setGameVariant('xiangqi'));
+    await waitForState(a.page, 's.boardCols === 9', 30_000);
+    await waitIdle(a.page);
+    const code = await createRoom(a.page);
+    // Red soldier forward one point, before anyone joins.
+    await a.page.evaluate(() => (window as any).wizardChess.executeChessMove(6, 4, 5, 4));
+    await waitIdle(a.page);
+
+    // B's startup preload fails, so its xiangqi models are still loading (slowly) when it joins.
+    const resyncWarnings: string[] = [];
+    let xiangqiAssets: 'abort' | 'slow' = 'abort';
+    let slowAssetsServed = 0;
+    const b = await openPlayer(browser, async (page) => {
+      page.on('console', (msg) => {
+        if (msg.type() === 'warning' && msg.text().includes('Room resynced')) resyncWarnings.push(msg.text());
+      });
+      await page.route('**/assets/glb/xiangqi/**', async (route) => {
+        if (xiangqiAssets === 'abort') return route.abort();
+        await new Promise((r) => setTimeout(r, 1500));
+        await route.fallback();
+        slowAssetsServed += 1;
+      });
+    });
+    await b.page.waitForTimeout(5500); // let the failed-load retry backoff expire
+    xiangqiAssets = 'slow';
+    await b.page.evaluate((code) => (window as any).wizardChess.joinMultiplayerRoom(code), code);
+
+    // Assert only after the slow load has finished and its board reset has run:
+    // boardCols follows the variant flag, so it cannot tell a chess board from a xiangqi one.
+    await expect.poll(() => slowAssetsServed, { timeout: 30_000 }).toBeGreaterThanOrEqual(7);
+    await waitIdle(b.page);
+    await waitForState(b.page, 's.moveHistoryCount === 1 && !s.isAnimatingMove', 15_000);
+    const probe = (r: number, c: number) =>
+      b.page.evaluate(([r, c]) => (window as any).wizardChess.inspectSquare(r, c), [r, c]);
+    expect((await probe(9, 4))?.type).toBe('king');
+    expect((await probe(0, 8))?.type).toBe('rook');
+    expect((await probe(5, 4))?.color).toBe('w');
+    expect(await probe(6, 4)).toBeNull();
+    expect(resyncWarnings).toEqual([]);
+    expect(b.errors.filter((e) => !e.includes('Failed to load resource'))).toEqual([]);
   });
 
   test('a third player is turned away from a full room', async ({ browser }) => {
