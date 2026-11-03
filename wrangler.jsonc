@@ -11,6 +11,10 @@
     {
       "pattern": "chess.tqd.io.vn",
       "custom_domain": true
+    },
+    {
+      "pattern": "chess.tqd.me",
+      "custom_domain": true
     }
   ],
   "assets": {

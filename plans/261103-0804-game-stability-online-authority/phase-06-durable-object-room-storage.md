@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "Durable Object room storage"
-status: pending
+status: completed
 effort: 4h
 pr: PR 2
 ---
@@ -238,3 +238,9 @@ A failed deploy, an authentication prompt from `wrangler`, or a production smoke
 - The Durable Object reuses `ROOM_TTL_MS` from `roomStore.ts` for its idle alarm.
 - No rollback after migration v1 is live: Cloudflare blocks rollbacks across a Durable Object class change. Production is forward-fix only; the emergency stop is `ROOMS_BACKEND=memory`.
 - After the fix: lint clean, unit 29/29, local Durable Object online-room suite 7/7, Vite e2e 15 passed and 1 skipped.
+
+## Deploy results (2026-11-03)
+
+- Staging `wizard-chess-3d-staging.ngulongyquan.workers.dev`: online-room suite 7/7; room `9GBD` still returned `"ok":true` after a second staging deploy.
+- Production `chess.tqd.io.vn`: deployed with the Durable Object binding and migration v1; online-room suite 7/7 against production.
+- The user asked to add `chess.tqd.me` as a second custom domain on the production worker. Both domains serve the game and share rooms; a room created through `chess.tqd.me` reads back through `chess.tqd.io.vn`.
