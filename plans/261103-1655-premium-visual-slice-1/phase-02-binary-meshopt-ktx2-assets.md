@@ -170,6 +170,7 @@ pr: PR A
 - Task 2.9: models ship as `.glb.gz`; first load = 6,643,450 bytes. The loader inflates with `DecompressionStream` and skips that when the server already decoded it (Vite dev sends `Content-Encoding: gzip`; checked via the gzip magic bytes).
 - Deviation: plain `.glb` files are not committed or shipped. Only `.glb.gz` exists in `public/assets/glb` (56 files, 14.0 MB vs 37.9 MB of b64). The encoder writes the plain `.glb` to a temp file only for the optional KTX2 step, and `--check` and the unit test gunzip the `.glb.gz`.
 - Exit check: `tsc` clean, unit 31/31, e2e 16 passed + 1 pre-existing skip. Refetch-storm tests still pass.
+- Checkpoint fix: `--check` now also compares skinned meshes. meshopt stores skinned positions as normalized int16 and folds the scale into the inverse bind matrices, so raw POSITION ranges differ by design; the check compares bind-pose skinned bounds (joint world matrix x inverse bind matrix, weighted) within 1%, requires JOINTS_0/WEIGHTS_0, and requires one inverse bind matrix per joint. 55 skinned meshes compared, `CHECK OK 56`. With the tolerance cut to 1e-7 all 55 report a mismatch, so the comparison is live.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.

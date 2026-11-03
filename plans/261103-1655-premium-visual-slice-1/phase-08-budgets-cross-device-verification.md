@@ -60,10 +60,10 @@ pr: PR B
 - **Steps:**
   1. Ask the user for approval to deploy to staging. Wait for a clear yes.
   2. Deploy staging with the command in "Gates", then rebuild production locally.
-  3. `curl -sI -H 'Accept-Encoding: gzip, br' "https://wizard-chess-3d-staging.ngulongyquan.workers.dev/assets/glb/king_white.glb?v=meshopt_v1"` and record `content-type` and `content-encoding`.
+  3. `curl -sI -H 'Accept-Encoding: gzip, br' "https://wizard-chess-3d-staging.ngulongyquan.workers.dev/assets/glb/king_white.glb.gz?v=meshopt_v1"` and record `content-type` and `content-encoding`. Expect `application/gzip` and no `content-encoding` (the loader inflates it with `DecompressionStream`).
   4. Test `'first playable transfer size'` in `perf-budget.spec.ts`, run with `E2E_BASE_URL` set to staging: fresh context, open the game, `waitIdle`, then sum `transferSize` of `performance.getEntriesByType('navigation')` and `('resource')` entries. Print the total and the 5 largest entries.
 - **Pass condition:** total ≤ 10,485,760 bytes.
-- **Verify:** the printed total meets the pass condition. `content-encoding` is expected to be absent for `.glb` (Cloudflare does not compress that type); phase 2 Task 2.8/2.9 already budgeted for that.
+- **Verify:** the printed total meets the pass condition. The models ship as `.glb.gz` (phase 2 Task 2.9), so the measured size already includes the gzip layer.
 
 ### Task 8.4b — Per-skin download budget
 
@@ -92,7 +92,7 @@ pr: PR B
 - **Steps:**
   1. Delete every `public/assets/glb/**/*.glb.gz.b64`.
   2. In `loadGltfModel`, delete the b64 branch and the `ASSET_FORMAT` constant.
-  3. Change the encoder script to read `.glb` sources for future runs (or document in its header that the b64 inputs are gone and Blender round-trips should feed `.glb` directly). Update `scripts/glb-pipeline.mjs` `pack` to write `.glb` via `encode-glb-assets.mjs` instead of `.glb.gz.b64`.
+  3. Any re-encode must bump `ASSET_CACHE_VER` (`/assets/*` is immutable for a year). Change the encoder script to read `.glb` sources for future runs (or document in its header that the b64 inputs are gone and Blender round-trips should feed `.glb` directly). Update `scripts/glb-pipeline.mjs` `pack` to write `.glb` via `encode-glb-assets.mjs` instead of `.glb.gz.b64`.
   4. Update the unit test from phase 2 Task 2.7: it now lists `.glb` files and expects 56.
 - **Verify:** `npm run lint && npm test && npx playwright test 2>&1 | tail -5` exits 0 with all tests passed, and `find public/assets/glb -name '*.b64' | wc -l` prints `0`.
 

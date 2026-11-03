@@ -6,8 +6,10 @@
  * Usage:
  *   node scripts/encode-glb-assets.mjs           encode every *.glb.gz.b64 into a sibling *.glb.gz
  *
+ *   node scripts/encode-glb-assets.mjs --check   compare each pair: counts, names, mesh bounds and skins
+ *
  * The game fetches *.glb.gz: Cloudflare does not compress model/gltf-binary, so the gzip layer lives in the file.
- *   node scripts/encode-glb-assets.mjs --check   compare each pair: counts, names and mesh bounds
+ * /assets/* is served immutable for a year: after re-encoding, bump ASSET_CACHE_VER in src/wizardChessEngine.js.
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -94,12 +96,71 @@ async function encode() {
   console.log(`TOTAL b64=${totalB64} glb.gz=${totalGlb}`);
 }
 
+function multiplyMat4(a, b) {
+  const out = new Array(16).fill(0);
+  for (let col = 0; col < 4; col++) {
+    for (let row = 0; row < 4; row++) {
+      for (let k = 0; k < 4; k++) out[col * 4 + row] += a[k * 4 + row] * b[col * 4 + k];
+    }
+  }
+  return out;
+}
+
+/**
+ * Bind-pose bounds of a skinned mesh. meshopt quantizes skinned positions and folds the scale into the
+ * inverse bind matrices, so raw accessor ranges differ by design; the skinned result must not.
+ */
+function skinnedBounds(node) {
+  const skin = node.getSkin();
+  const joints = skin.listJoints();
+  const ibm = skin.getInverseBindMatrices();
+  const jointMatrices = joints.map((joint, j) => multiplyMat4(joint.getWorldMatrix(), ibm.getElement(j, [])));
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  const v = [];
+  const js = [];
+  const ws = [];
+  for (const prim of node.getMesh().listPrimitives()) {
+    const pos = prim.getAttribute('POSITION');
+    const jointsAttr = prim.getAttribute('JOINTS_0');
+    const weightsAttr = prim.getAttribute('WEIGHTS_0');
+    if (!jointsAttr || !weightsAttr) return null;
+    for (let i = 0; i < pos.getCount(); i++) {
+      pos.getElement(i, v);
+      jointsAttr.getElement(i, js);
+      weightsAttr.getElement(i, ws);
+      const total = ws.reduce((n, w) => n + w, 0) || 1;
+      for (let axis = 0; axis < 3; axis++) {
+        let value = 0;
+        for (let k = 0; k < 4; k++) {
+          const m = jointMatrices[js[k]];
+          if (!ws[k] || !m) continue;
+          value += (ws[k] / total) * (m[axis] * v[0] + m[4 + axis] * v[1] + m[8 + axis] * v[2] + m[12 + axis]);
+        }
+        min[axis] = Math.min(min[axis], value);
+        max[axis] = Math.max(max[axis], value);
+      }
+    }
+  }
+  return { min, max };
+}
+
 function summarize(doc) {
   const root = doc.getRoot();
   const meshBounds = {};
+  const skinnedMeshes = {};
   for (const node of root.listNodes()) {
-    if (!node.getMesh() || node.getSkin()) continue;
-    meshBounds[node.getName()] = getBounds(node);
+    if (!node.getMesh()) continue;
+    const skin = node.getSkin();
+    if (!skin) {
+      meshBounds[node.getName()] = getBounds(node);
+      continue;
+    }
+    skinnedMeshes[node.getName()] = {
+      joints: skin.listJoints().length,
+      inverseBindMatrices: skin.getInverseBindMatrices()?.getCount() ?? 0,
+      bounds: skinnedBounds(node)
+    };
   }
   return {
     meshes: root.listMeshes().length,
@@ -108,11 +169,13 @@ function summarize(doc) {
     channels: root.listAnimations().reduce((n, a) => n + a.listChannels().length, 0),
     meshNames: root.listMeshes().map((m) => m.getName()).sort(),
     materialNames: root.listMaterials().map((m) => m.getName()).sort(),
-    meshBounds
+    meshBounds,
+    skinnedMeshes
   };
 }
 
 function compareBounds(a, b) {
+  if (![...a.min, ...a.max, ...b.min, ...b.max].every(Number.isFinite)) return false;
   for (let axis = 0; axis < 3; axis++) {
     const extent = Math.max(a.max[axis] - a.min[axis], 1e-6);
     const drift = Math.max(Math.abs(a.min[axis] - b.min[axis]), Math.abs(a.max[axis] - b.max[axis]));
@@ -145,6 +208,19 @@ async function check() {
     for (const [nodeName, bounds] of Object.entries(before.meshBounds)) {
       const other = after.meshBounds[nodeName];
       if (!other || !compareBounds(bounds, other)) problems.push(`${name}: bounds of node "${nodeName}" moved`);
+    }
+    for (const [nodeName, skin] of Object.entries(after.skinnedMeshes)) {
+      if (skin.joints !== skin.inverseBindMatrices) {
+        problems.push(`${name}: skin of "${nodeName}" has ${skin.joints} joints but ${skin.inverseBindMatrices} inverse bind matrices`);
+      }
+      if (!skin.bounds) problems.push(`${name}: skinned mesh "${nodeName}" lost JOINTS_0/WEIGHTS_0`);
+    }
+    for (const [nodeName, skin] of Object.entries(before.skinnedMeshes)) {
+      const other = after.skinnedMeshes[nodeName];
+      if (!other) problems.push(`${name}: skinned node "${nodeName}" missing`);
+      else if (skin.bounds && other.bounds && !compareBounds(skin.bounds, other.bounds)) {
+        problems.push(`${name}: bind-pose bounds of skinned node "${nodeName}" moved`);
+      }
     }
   }
 
