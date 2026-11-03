@@ -4154,6 +4154,10 @@ export function initWizardChess() {
     let roomEventSource = null;
     let roomPollTimer = null;
     let appliedMoveSeq = 0;
+    let remoteSyncSession = 0; // bump to cancel any in-flight remote drain
+    let latestRemoteRoom = null; // newest room snapshot from any sync source
+    let remoteDrainActive = false; // only one drain loop at a time
+    let multiPlyCount = 0; // plies on the board since the last reset; unlike moveHistory, never capped
     let appliedResetCount = 0;
     let roomBothReady = false;
     let roomInviteCopied = false;
@@ -4996,6 +5000,7 @@ export function initWizardChess() {
       // pop back 2 plies (AI reply + player's last move) so the human gets their turn back.
       // In 2-Player Pass & Play mode (isPassAndPlay || !aiAutoPlay), always pop exactly 1 ply.
       let targetEntry = moveHistory.pop();
+      if (targetEntry) multiPlyCount = Math.max(0, multiPlyCount - 1);
       if (
         gameMode === 'single' &&
         !isPassAndPlay &&
@@ -5006,6 +5011,7 @@ export function initWizardChess() {
         moveHistory.length > 0
       ) {
         targetEntry = moveHistory.pop();
+        if (targetEntry) multiPlyCount = Math.max(0, multiPlyCount - 1);
       }
       if (!targetEntry || !targetEntry.snapshot) return false;
       const ok = restoreBoardSnapshot(targetEntry.snapshot);
@@ -5056,6 +5062,7 @@ export function initWizardChess() {
       capturedByWhite = 0;
       capturedByBlack = 0;
       moveHistory = [];
+      multiPlyCount = 0;
       enPassantTarget = null;
       halfMoveClock = 0;
       lastMoveSquares = null;
@@ -6238,6 +6245,7 @@ export function initWizardChess() {
           promotion: chosenPromotion
         }
       });
+      multiPlyCount += 1;
       if (moveHistory.length > 60) {
         moveHistory.shift();
       }
@@ -7762,6 +7770,7 @@ export function initWizardChess() {
       }
 
       const lastEntry = moveHistory.pop();
+      if (lastEntry) multiPlyCount = Math.max(0, multiPlyCount - 1);
       restoreBoardSnapshot(lastEntry.snapshot);
       return true;
     }
@@ -8884,31 +8893,43 @@ export function initWizardChess() {
       if (duelStatusEl) duelStatusEl.textContent = `Máy chủ phòng từ chối: ${message}`;
     }
 
+    function pushStaticRoomMove(movePayload) {
+      const stRoom = getStaticRoom(roomCode);
+      if (!stRoom) return;
+      stRoom.moves = stRoom.moves || [];
+      stRoom.moves.push({
+        seq: stRoom.moves.length + 1,
+        color: movePayload.color,
+        from: movePayload.from,
+        to: movePayload.to,
+        promotion: movePayload.promotion || 'queen',
+        ts: Date.now()
+      });
+      stRoom.turn = movePayload.color === 'w' ? 'b' : 'w';
+      stRoom.updatedAt = Date.now();
+      saveAndBroadcastStaticRoom(stRoom);
+    }
+
     async function sendMultiplayerMove(movePayload) {
       if (!roomCode) return;
-      // 1. Update static local/BroadcastChannel room store immediately
-      const stRoom = getStaticRoom(roomCode);
-      if (stRoom) {
-        stRoom.moves = stRoom.moves || [];
-        stRoom.moves.push({
-          seq: stRoom.moves.length + 1,
-          color: movePayload.color,
-          from: movePayload.from,
-          to: movePayload.to,
-          promotion: movePayload.promotion || 'queen',
-          ts: Date.now()
-        });
-        stRoom.turn = movePayload.color === 'w' ? 'b' : 'w';
-        stRoom.updatedAt = Date.now();
-        saveAndBroadcastStaticRoom(stRoom);
-      }
-      // 2. Also broadcast to cloud/local room API if reachable
+      // Static hosts have no room server; share the move with other tabs right away.
+      if (isStaticHost) pushStaticRoomMove(movePayload);
       const data = await mpApiRequest(`/api/rooms/${roomCode}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(movePayload)
       });
-      if (data && !data.ok) {
+      if (data === null) {
+        // Server unreachable: the static localStorage/BroadcastChannel room carries the game.
+        if (!isStaticHost) pushStaticRoomMove(movePayload);
+        return;
+      }
+      if (!data.ok) {
+        // Only the server's move list is authoritative; a rejected move must not reach other tabs.
+        if (data.room) {
+          saveAndBroadcastStaticRoom(data.room);
+          resyncFromRoomMoves(data.room);
+        }
         showRoomApiError(data.error || 'Move rejected');
       }
     }
@@ -8922,10 +8943,71 @@ export function initWizardChess() {
         clearInterval(roomPollTimer);
         roomPollTimer = null;
       }
+      remoteSyncSession += 1;
+      remoteDrainActive = false;
+      latestRemoteRoom = null;
+    }
+
+    function drainRemoteMoves(session) {
+      if (remoteDrainActive) return;
+      remoteDrainActive = true;
+      const step = () => {
+        if (session !== remoteSyncSession || gameMode !== 'multi') {
+          if (session === remoteSyncSession) remoteDrainActive = false;
+          return;
+        }
+        const room = latestRemoteRoom;
+        // A variant switch loads models asynchronously; wait for it like an animation.
+        if (isAnimatingMove || (room?.gameVariant && room.gameVariant !== gameVariant)) {
+          setTimeout(step, 120);
+          return;
+        }
+        const moves = room?.moves || [];
+        if (appliedMoveSeq >= moves.length) {
+          remoteDrainActive = false;
+          return;
+        }
+        const next = moves[appliedMoveSeq];
+        const piece = boardState[next.from.r]?.[next.from.c];
+        const inSync =
+          multiPlyCount === appliedMoveSeq && piece && piece.color === currentTurn && piece.color === next.color;
+        if (!inSync) {
+          remoteDrainActive = false;
+          resyncFromRoomMoves(room);
+          return;
+        }
+        executeChessMove(next.from.r, next.from.c, next.to.r, next.to.c, {
+          fromRemote: true,
+          promotion: next.promotion || 'queen'
+        });
+        appliedMoveSeq = next.seq;
+        setTimeout(step, 250);
+      };
+      step();
+    }
+
+    function resyncFromRoomMoves(room) {
+      if (!room || !Array.isArray(room.moves)) return;
+      remoteSyncSession += 1;
+      remoteDrainActive = false;
+      if (isAnimatingMove) completeCurrentMoveImmediately();
+      resetChessBoard(false);
+      appliedMoveSeq = 0;
+      for (const move of room.moves) {
+        executeChessMove(move.from.r, move.from.c, move.to.r, move.to.c, {
+          fromRemote: true,
+          promotion: move.promotion || 'queen'
+        });
+        completeCurrentMoveImmediately();
+        appliedMoveSeq = move.seq;
+      }
+      console.warn('Room resynced from server move list', room.code, room.moves.length);
     }
 
     function applyRemoteRoomState(room) {
       if (!room) return;
+      if (roomCode && room.code && room.code !== roomCode) return;
+      latestRemoteRoom = room;
       const statusEl = document.getElementById('hud-room-status');
       const bothReady = Boolean(room.whiteJoined && room.blackJoined);
       const prevBothReady = roomBothReady;
@@ -8987,34 +9069,14 @@ export function initWizardChess() {
 
       if (room.resetCount > appliedResetCount) {
         appliedResetCount = room.resetCount;
+        remoteSyncSession += 1;
+        remoteDrainActive = false;
         appliedMoveSeq = 0;
         resetChessBoard(false);
       }
 
       if (Array.isArray(room.moves) && room.moves.length > appliedMoveSeq) {
-        const tryApplyNext = () => {
-          if (isAnimatingMove) {
-            setTimeout(tryApplyNext, 120);
-            return;
-          }
-          if (appliedMoveSeq >= room.moves.length) return;
-          const nextMove = room.moves[appliedMoveSeq];
-          appliedMoveSeq = nextMove.seq || (appliedMoveSeq + 1);
-          const pieceAtFrom = boardState[nextMove.from.r]?.[nextMove.from.c];
-          if (pieceAtFrom && pieceAtFrom.color === currentTurn) {
-            executeChessMove(
-              nextMove.from.r,
-              nextMove.from.c,
-              nextMove.to.r,
-              nextMove.to.c,
-              { fromRemote: true, promotion: nextMove.promotion || 'queen' }
-            );
-          }
-          if (appliedMoveSeq < room.moves.length) {
-            setTimeout(tryApplyNext, 250);
-          }
-        };
-        tryApplyNext();
+        drainRemoteMoves(remoteSyncSession);
       }
     }
 
@@ -10189,6 +10251,7 @@ export function initWizardChess() {
         lastMoveSquares = null;
         drawReason = '';
         moveHistory = [];
+        multiPlyCount = 0;
         hidePromotionModal();
         clearCheckmateSequence();
         clearSquareHighlights();

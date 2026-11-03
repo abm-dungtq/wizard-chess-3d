@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Idempotent remote move reconcile"
-status: pending
+status: completed
 effort: 2h
 pr: PR 1
 ---
@@ -146,3 +146,17 @@ Spawn the `kongming` subagent for next-step counsel and pass:
 - the pass condition it failed to meet.
 Apply kongming's guidance, then re-run the Verify step.
 If `kongming` cannot be spawned in this environment, STOP and report the same failure evidence to the user. Never continue by self-reasoning.
+
+## Adjustments from the phase-2 checkpoint (GO)
+
+- **Task 3.2 step 8, reorder `sendMultiplayerMove`.** Send the API request first. Push the move into the static localStorage/BroadcastChannel room only when `data === null` (server unreachable) or on a static host (`isStaticHost`). On `data.ok`, do nothing; the poll and SSE refresh the static copy. On `!data.ok && data.room`, call `saveAndBroadcastStaticRoom(data.room)`, then `resyncFromRoomMoves(data.room)`, then `showRoomApiError`. Today the static push happens before the server answers. A rejected move then leaks to other tabs in the same browser with a `seq` that collides with the next real move, and the drain loop's `appliedMoveSeq >= moves.length` exit hides the desync.
+- **`resyncFromRoomMoves`.** Right after bumping `remoteSyncSession`, call `if (isAnimatingMove) completeCurrentMoveImmediately();` so a half-flown mesh from the mover's own move does not linger.
+- **Extra e2e case.** A sends an out-of-turn move with `executeChessMove` while it is B's turn. Expect A's `moveHistoryCount` to return to the server's count and `#duel-status-msg` to contain "Not your turn".
+- **Report only, no fix in this plan.** "Room not found" rejections carry no `room`, so the client stays in `multi` with a dead room. The AI test `maxSliceMs < 14.0` flakes under `--experimental-test-coverage`. Note both in the PR body.
+
+## Execution notes
+
+- `executeChessMove` refuses a piece that is not `currentTurn`'s colour, so the engine can never send an out-of-turn move itself. The rejection e2e test therefore builds a real race. It blocks player A's SSE and state poll, posts e4 for A straight to the server, then has A's client (still on white's turn) play d4. The server answers "Not your turn" with its room, and A's board rebuilds to e4 only.
+- `multiPlyCount` also decrements at each `moveHistory.pop()` (undo and step-back), so the counter stays correct after single-player undo.
+- Two source-string assertions in `test/applet.test.mjs` were updated: the old `pieceAtFrom` turn guard and the old promotion forwarding in `tryApplyNext`.
+- Known gap: `applyRemoteRoomState` rewrites `#duel-status-msg` on every room update, so a rejection message is visible only until the next poll (up to 1.5 s).

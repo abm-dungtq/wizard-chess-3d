@@ -864,8 +864,9 @@ test('2-Player Mode (Pass & Play Hotseat, Seamless Capture Auto-Flip Camera, 1-P
 
   // 4. Null-safe Cross-Tab ?room=CODE sync & pawn promotion forwarding
   assert.ok(
-    engineJs.includes("{ fromRemote: true, promotion: nextMove.promotion || 'queen' }"),
-    'applyRemoteRoomState must forward promotion choice to executeChessMove'
+    engineJs.includes("promotion: next.promotion || 'queen'") &&
+      engineJs.includes("promotion: move.promotion || 'queen'"),
+    'drainRemoteMoves and resyncFromRoomMoves must forward promotion choice to executeChessMove'
   );
   assert.ok(
     !engineJs.includes("document.getElementById('modal-room-code').textContent") &&
@@ -917,9 +918,10 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
     'playerToken must use sessionStorage first so two tabs on the same browser receive distinct seats while F5 refresh reconnects'
   );
   assert.ok(
-    engineJs.includes('if (pieceAtFrom && pieceAtFrom.color === currentTurn)') &&
+    engineJs.includes('function drainRemoteMoves(session)') &&
+      engineJs.includes('piece.color === currentTurn && piece.color === next.color') &&
       engineJs.includes("gameMode !== 'multi' && moveHistory.length > 0"),
-    'applyRemoteRoomState must guard turn color and syncActionButtonsUI must lock #btn-undo in online multi mode'
+    'drainRemoteMoves must guard turn color and syncActionButtonsUI must lock #btn-undo in online multi mode'
   );
   assert.ok(
     engineJs.includes("document.getElementById('duel-room-overlay')?.classList.contains('visible')"),

@@ -44,7 +44,7 @@ Source decision: [brainstorm report](../reports/brainstorm-261102-1743-game-qual
 |---|---|---|---|---|---|
 | 1 | [Playwright smoke harness](phase-01-playwright-smoke-harness.md) | PR 1 | 3h | completed | none |
 | 2 | [Room API auth and anti-hijack](phase-02-room-api-auth-and-anti-hijack.md) | PR 1 | 3h | completed | 1 |
-| 3 | [Idempotent remote move reconcile](phase-03-idempotent-remote-move-reconcile.md) | PR 1 | 2h | pending | 2 |
+| 3 | [Idempotent remote move reconcile](phase-03-idempotent-remote-move-reconcile.md) | PR 1 | 2h | completed | 2 |
 | 4 | [Render loop robustness and smoothness](phase-04-render-loop-robustness.md) | PR 1 | 3h | pending | 3 |
 | 5 | [Server-side move legality](phase-05-server-side-move-legality.md) | PR 2 | 2h | pending | 2 |
 | 6 | [Durable Object room storage](phase-06-durable-object-room-storage.md) | PR 2 | 4h | pending | 5 |
