@@ -264,9 +264,16 @@ test.describe('single-player smoke', () => {
     await page.mouse.click(5, 5);
     await waitForState(page, 's.cinematicActive === false && s.killCamDof === false', 1_200);
 
+    // A second checkmate while the kill-cam runs must still return the camera to the original seat.
+    const seat = (await getState(page)).cameraPos as number[];
+    await page.evaluate(() => (window as any).wizardChess.triggerCheckmateSequence('b', 'w'));
+    await waitForState(page, 's.cinematicActive === true', 500);
     await page.evaluate(() => (window as any).wizardChess.triggerCheckmateSequence('b', 'w'));
     await waitForState(page, 's.cinematicActive === true', 500);
     await waitForState(page, 's.cinematicActive === false', 4_500);
+    await page.waitForTimeout(1_200);
+    const back = (await getState(page)).cameraPos as number[];
+    expect(Math.hypot(back[0] - seat[0], back[1] - seat[1], back[2] - seat[2])).toBeLessThan(0.05);
 
     await page.evaluate(() => {
       const w = (window as any).wizardChess;

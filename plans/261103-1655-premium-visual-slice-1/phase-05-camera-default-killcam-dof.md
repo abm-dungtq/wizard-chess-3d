@@ -141,6 +141,8 @@ Move animations themselves are not changed by Motion level in this slice. Their 
 - Visuals: `visuals/spectator-default.png`, `visuals/killcam-ultra-dof.png` (background blurred, king sharp).
 - e2e: 'spectator camera keeps the whole board in view' and 'kill-cam runs on checkmate, skips, and never blocks moves' pass. The quick-cam button is hidden on desktop, so the test clicks it through the DOM.
 - Phase exit check: lint OK, unit 31 pass, e2e 20 pass + 1 pre-existing skip.
+- Kongming checkpoint: GO-WITH-FIXES. Applied: the kill-cam restore pose comes from a pending preset tween's end (the pass-and-play side flip queued just before checkmate) instead of the camera's current position; a second kill-cam while one runs ends the first, so the restore pose is not overwritten with the kill-cam pose; a viewport resize ends the kill-cam before presets are re-applied; `getState()` projects the board corners once. The kill-cam e2e now checks that a double trigger still returns the camera to its seat.
+- Noted for a later slice: `spectator` does not auto-flip with the turn in pass-and-play (only `player` does, same as `top` today). `BokehPass.uniforms.aspect` is not updated on resize, so DOF blur is slightly anisotropic after a resize on ultra.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.

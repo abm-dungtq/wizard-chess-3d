@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "Tiered post-processing composer"
-status: pending
+status: completed
 effort: 4h
 pr: PR B
 ---

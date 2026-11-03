@@ -5095,7 +5095,12 @@ export function initWizardChess() {
 
     function startKillCam(kingWorldPos, fallDir, forwardDirZ) {
       if (motionLevel !== 'full' || heldCameraKeys.size > 0) return;
-      cinematicRestore = { pos: camera.position.clone(), target: orbitControls.target.clone() };
+      if (cinematicActive) endKillCam(true);
+      // Return to where a pending preset tween was heading (e.g. the pass-and-play side flip), not where it was.
+      cinematicRestore = {
+        pos: (activeCamTransition?.endPos ?? camera.position).clone(),
+        target: (activeCamTransition?.endTarget ?? orbitControls.target).clone()
+      };
       cinematicActive = true;
       cinematicTimer = 0;
       orbitControls.enabled = false;
@@ -9705,6 +9710,14 @@ export function initWizardChess() {
       });
     }
 
+    function boardCornerState() {
+      const boardCornerNdc = projectBoardCorners();
+      return {
+        boardCornerNdc,
+        boardCornersInView: boardCornerNdc.every(([x, y]) => Math.abs(x) <= 0.96 && Math.abs(y) <= 0.92)
+      };
+    }
+
     function setCameraPose(posArr, targetArr) {
       activeCamTransition = null;
       if (Array.isArray(posArr) && posArr.length === 3) {
@@ -10768,8 +10781,7 @@ export function initWizardChess() {
         capturedByBlack,
         cameraPos: camera.position.toArray(),
         cameraTarget: orbitControls.target.toArray(),
-        boardCornerNdc: projectBoardCorners(),
-        boardCornersInView: projectBoardCorners().every(([x, y]) => Math.abs(x) <= 0.96 && Math.abs(y) <= 0.92),
+        ...boardCornerState(),
         cameraFov: camera.fov,
         portraitFramingFactor: Number(getPortraitFramingFactor().toFixed(3)),
         playerCamSide,
@@ -11477,6 +11489,8 @@ export function initWizardChess() {
       syncResponsiveCameraFov();
       camera.updateProjectionMatrix();
       applyRendererSize();
+      // The saved kill-cam pose no longer frames the new viewport, so a resize ends it.
+      endKillCam(true);
       if (!isAnimatingMove) {
         if (document.getElementById('btn-cam-player')?.classList.contains('active')) {
           setCameraForSide(playerCamSide, true);
