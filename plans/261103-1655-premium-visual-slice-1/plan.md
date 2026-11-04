@@ -1,7 +1,7 @@
 ---
 title: "Premium visual upgrade, slice 1: camera, HUD, labels, post-FX, motion settings, assets, audio"
 description: "Make the default view look premium on Mac while phones and Windows keep running: 3/4 camera, Liquid Glass dock, hover/selection labels, tiered post-processing, a Motion setting, binary meshopt/KTX2 assets, and a stall-free spatial audio bus."
-status: pending
+status: completed
 priority: P2
 effort: 26h
 branch: claude/premium-visual-slice-1
@@ -30,7 +30,7 @@ This plan is written for a downstream executor model. Every phase lists tasks wi
   - `base`: none.
 - A "Motion" setting (full / quick / off) is persisted. Its default follows `prefers-reduced-motion`. It controls camera cinematics, camera tweens and screen tremors. Piece move animations keep their timing, because online play depends on it.
 - A "Quality" button (auto / ultra / high / base) lets the user override the detected tier.
-- Piece, skin-set, xiangqi and cathedral models ship as binary `.glb` with meshopt geometry. Cathedral textures ship as KTX2. The base64 layer is gone.
+- Piece, skin-set, xiangqi and cathedral models ship as binary `.glb` with meshopt geometry. Cathedral textures stay JPEG for now: KTX2 is wired in the client and the encoder but not applied, because KTX-Software is not installed (see Result). The base64 layer is gone.
 - The first move no longer stalls on AudioContext start-up. Impact sounds are positioned in 3D (HRTF) at the board square.
 
 ## Constraints
@@ -54,14 +54,14 @@ This plan is written for a downstream executor model. Every phase lists tasks wi
 
 | # | Phase | PR | Effort | Status | Depends on |
 |---|---|---|---|---|---|
-| 1 | [Settings store, Motion setting, quality tiers](phase-01-settings-motion-quality-tiers.md) | PR A | 3h | pending | none |
-| 2 | [Binary meshopt/KTX2 asset delivery](phase-02-binary-meshopt-ktx2-assets.md) | PR A | 5h | pending | none |
+| 1 | [Settings store, Motion setting, quality tiers](phase-01-settings-motion-quality-tiers.md) | PR A | 3h | completed | none |
+| 2 | [Binary meshopt/KTX2 asset delivery](phase-02-binary-meshopt-ktx2-assets.md) | PR A | 5h | completed | none |
 | 3 | [Audio unlock and HRTF bus](phase-03-audio-unlock-hrtf.md) | PR A | 2h | completed | none |
 | 4 | [Tiered post-processing composer](phase-04-tiered-post-processing.md) | PR B | 4h | completed | 1 |
 | 5 | [3/4 default camera, top-down toggle, kill-cam DOF](phase-05-camera-default-killcam-dof.md) | PR B | 4h | completed | 1, 4 |
 | 6 | [Labels on selection and hover](phase-06-labels-selection-hover.md) | PR B | 2h | completed | 5 |
 | 7 | [Liquid Glass HUD dock](phase-07-liquid-glass-hud-dock.md) | PR B | 4h | completed | 1, 5 |
-| 8 | [Budgets and cross-device verification](phase-08-budgets-cross-device-verification.md) | PR B | 2h | pending | 1-7 |
+| 8 | [Budgets and cross-device verification](phase-08-budgets-cross-device-verification.md) | PR B | 2h | completed | 1-7 |
 
 - PR A (phases 1-3) has no visible layout change except the Motion setting row. It can ship on its own.
 - PR B (phases 4-8) is branched from PR A.
@@ -81,6 +81,15 @@ Numbers come from the brainstorm contract. Phase 8 measures all of them.
 6. **Audio:** the first player move after page load does not create the AudioContext inside the move handler. `getState().audioState.contextState` is `running` before the first move when any earlier gesture happened (field added in phase 3).
 7. **No regressions:** `npm run lint`, `npm test` and `npm run test:e2e` (all existing smoke and online tests) pass.
 8. **Phones and Windows:** the `base` tier loads and plays a move with zero console errors under Playwright WebKit iPhone emulation and Chromium Pixel emulation. Windows is checked by the user on a real machine, listed as a residual check.
+
+## Result (2026-11-04)
+
+All 8 phases are completed. The measured numbers are in the [phase 8 acceptance table](phase-08-budgets-cross-device-verification.md#acceptance-results); every measured criterion passed. One criterion is unmeasured and one outcome item is deferred:
+
+- **Open:** the vsync-on p95 ≤ 17 ms part of criterion 1. It needs a 60 Hz display, and this Mac only has 100 Hz monitors. The uncapped part passed (median 11.44 ms) after two reduction-ladder steps: bloom at quarter resolution and an `ultra` desktop DPR cap of 1.25.
+- **Not applied:** KTX2 textures for the cathedral. KTX-Software is not installed, so the cathedral keeps its JPEG textures. The client already decodes KTX2; re-running the encoder after installing KTX-Software adds it.
+- **Residual checks for the user:** Windows, real phones and Safari on macOS, listed in phase 8.
+- Staging (`wizard-chess-3d-staging`) runs this branch. Production is not deployed, and no PR is open.
 
 ## Key facts verified in code (2026-11-03)
 
@@ -103,4 +112,4 @@ Numbers come from the brainstorm contract. Phase 8 measures all of them.
 ## Rollback
 
 - Each phase is one or more commits on the branch. Revert the phase commits.
-- Phase 2 keeps the old `.glb.gz.b64` loader path behind `ASSET_FORMAT` until phase 8 passes on staging. Rolling back the asset change means setting `ASSET_FORMAT = 'b64'` and rebuilding.
+- The old `.glb.gz.b64` files and `ASSET_FORMAT` were removed in phase 8 after staging passed. Rolling back the asset format now means reverting that commit (`refactor(assets): drop the gzip+base64 model format`).
