@@ -145,4 +145,245 @@ test.describe('single-player smoke', () => {
   test('real canvas click selects a piece', async () => {
     test.skip(true, 'Engine exposes no world-to-screen helper; pointer picking is covered by unit raycast tests');
   });
+
+  test('audio unlocks on first gesture before the first move', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await openGame(page);
+    expect((await getState(page)).audioState.contextState).toBe('none');
+    // A HUD element, not the canvas: the document-level listener must catch it.
+    await page.click('.brand-pill');
+    await waitForState(page, "s.audioState.contextState === 'running'", 5_000);
+    const playsBefore = (await getState(page)).audioState.playCount;
+    await page.evaluate(() => (window as any).wizardChess.executeChessMove(6, 4, 4, 4));
+    await waitIdle(page);
+    const after = (await getState(page)).audioState;
+    expect(after.contextState).toBe('running');
+    expect(after.playCount).toBeGreaterThan(playsBefore);
+    expect(errors).toEqual([]);
+  });
+
+  test('post-processing follows the quality tier', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await openGame(page);
+    const s = await getState(page);
+    expect(s.qualityTier).toBe('high');
+    expect(s.postFx).toEqual({ active: true, gtao: false, bloom: true, dof: false });
+
+    await page.evaluate(() => (window as any).wizardChess.setQualityTier('ultra'));
+    await waitIdle(page);
+    expect((await getState(page)).postFx.gtao).toBe(true);
+    // A black or blank canvas compresses far below this.
+    expect((await page.locator('canvas').first().screenshot()).length).toBeGreaterThan(20_000);
+
+    await page.evaluate(() => (window as any).wizardChess.setQualityTier('base'));
+    expect((await getState(page)).postFx.active).toBe(false);
+    expect((await page.locator('canvas').first().screenshot()).length).toBeGreaterThan(20_000);
+
+    await page.evaluate(() => (window as any).wizardChess.executeChessMove(6, 4, 4, 4));
+    await waitIdle(page);
+    await page.evaluate(() => (window as any).wizardChess.setQualityTier('auto'));
+    expect(errors).toEqual([]);
+  });
+
+  test('motion level follows reduced-motion and persists', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.addInitScript(() => {
+      if (!sessionStorage.getItem('settings-cleared')) {
+        localStorage.removeItem('wizard_chess_settings_v1');
+        sessionStorage.setItem('settings-cleared', '1');
+      }
+    });
+    await openGame(page);
+    expect((await getState(page)).motionLevel).toBe('off');
+
+    await page.evaluate(() => (document.getElementById('btn-motion-level') as HTMLButtonElement).click());
+    expect((await getState(page)).motionLevel).toBe('full');
+    await page.reload();
+    await openGame(page);
+    expect((await getState(page)).motionLevel).toBe('full');
+    expect((await getState(page)).qualityTier).toBe('high');
+
+    for (let i = 0; i < 4 && (await getState(page)).qualityPreference !== 'base'; i++) {
+      await page.evaluate(() => (document.getElementById('btn-quality-tier') as HTMLButtonElement).click());
+    }
+    expect((await getState(page)).qualityTier).toBe('base');
+    await expect(page.locator('#quality-tier-label')).toHaveText(/Base/);
+    await page.reload();
+    await openGame(page);
+    expect((await getState(page)).qualityTier).toBe('base');
+    await page.evaluate(() => localStorage.removeItem('wizard_chess_settings_v1'));
+    expect(errors).toEqual([]);
+  });
+  test('spectator camera keeps the whole board in view', async ({ page }) => {
+    test.setTimeout(180_000);
+    const errors = collectConsoleErrors(page);
+    await page.setViewportSize({ width: 1470, height: 956 });
+    await openGame(page);
+    await expect(page.locator('#btn-cam-spectator')).toHaveClass(/active/);
+    expect((await getState(page)).boardCornersInView).toBe(true);
+    // The quick-cam button lives in the mobile dock and is hidden on desktop.
+    await page.evaluate(() => (document.getElementById('btn-quick-cam') as HTMLButtonElement).click());
+    await expect(page.locator('#btn-cam-top')).toHaveClass(/active/);
+    await page.evaluate(() => (document.getElementById('btn-quick-cam') as HTMLButtonElement).click());
+    await expect(page.locator('#btn-cam-spectator')).toHaveClass(/active/);
+
+    for (const size of [{ width: 1470, height: 956 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(size);
+      for (const variant of ['chess', 'xiangqi']) {
+        await page.evaluate((v) => (window as any).wizardChess.setGameVariant(v), variant);
+        await waitForState(page, `s.boardCols === ${variant === 'xiangqi' ? 9 : 8}`, 30_000);
+        await waitIdle(page);
+        await page.evaluate(() => {
+          const w = (window as any).wizardChess;
+          if (!document.getElementById('btn-cam-spectator')?.classList.contains('active')) w.setCameraPreset('spectator');
+        });
+        await page.waitForTimeout(900);
+        const s = await getState(page);
+        expect(s.boardCornersInView, `${variant} ${size.width}x${size.height} ${JSON.stringify(s.boardCornerNdc)}`).toBe(true);
+      }
+    }
+    expect(errors).toEqual([]);
+  });
+  test('kill-cam runs on checkmate, skips, and never blocks moves', async ({ page }) => {
+    test.setTimeout(120_000);
+    const errors = collectConsoleErrors(page);
+    await openGame(page);
+    await waitIdle(page);
+    await page.evaluate(() => {
+      const w = (window as any).wizardChess;
+      w.setMotionLevel('full');
+      w.setQualityTier('ultra');
+      w.triggerCheckmateSequence('b', 'w');
+    });
+    await waitForState(page, 's.cinematicActive === true', 500);
+    let s = await getState(page);
+    expect(s.killCamDof).toBe(true);
+    expect(s.isAnimatingMove).toBe(false);
+
+    await page.mouse.click(5, 5);
+    await waitForState(page, 's.cinematicActive === false && s.killCamDof === false', 1_200);
+
+    // A second checkmate while the kill-cam runs must still return the camera to the original seat.
+    const seat = (await getState(page)).cameraPos as number[];
+    await page.evaluate(() => (window as any).wizardChess.triggerCheckmateSequence('b', 'w'));
+    await waitForState(page, 's.cinematicActive === true', 500);
+    await page.evaluate(() => (window as any).wizardChess.triggerCheckmateSequence('b', 'w'));
+    await waitForState(page, 's.cinematicActive === true', 500);
+    await waitForState(page, 's.cinematicActive === false', 4_500);
+    await page.waitForTimeout(1_200);
+    const back = (await getState(page)).cameraPos as number[];
+    expect(Math.hypot(back[0] - seat[0], back[1] - seat[1], back[2] - seat[2])).toBeLessThan(0.05);
+
+    await page.evaluate(() => {
+      const w = (window as any).wizardChess;
+      w.setMotionLevel('off');
+      w.triggerCheckmateSequence('b', 'w');
+    });
+    for (let i = 0; i < 10; i++) {
+      s = await getState(page);
+      expect(s.cinematicActive).toBe(false);
+      await page.waitForTimeout(100);
+    }
+    await page.evaluate(() => (window as any).wizardChess.setQualityTier('auto'));
+    expect(errors).toEqual([]);
+  });
+
+  test('labels show only for selection and hover by default', async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await page.setViewportSize({ width: 1470, height: 956 });
+    await openGame(page);
+    await page.mouse.move(5, 5);
+    await waitIdle(page);
+    const badges = async () => (await getState(page)).visibleOverheadBadgeCount;
+    expect((await getState(page)).pieceLabelMode).toBe('tap');
+    expect(await badges()).toBe(0);
+
+    await page.evaluate(() => (window as any).wizardChess.inspectSquare(7, 1));
+    expect(await badges()).toBe(1);
+    await page.evaluate(() => (window as any).wizardChess.inspectSquare(-1, -1));
+    expect(await badges()).toBe(0);
+
+    const king = await page.evaluate(() => (window as any).wizardChess.getPieceScreenPoint(7, 4));
+    await page.mouse.move(king.x, king.y);
+    await expect.poll(async () => (await getState(page)).hoveredSquare).toEqual({ r: 7, c: 4 });
+    expect(await badges()).toBe(1);
+
+    await page.mouse.move(5, 5);
+    await expect.poll(badges).toBe(0);
+
+    await page.locator('#btn-piece-labels').evaluate((el: HTMLElement) => el.click());
+    await page.locator('#btn-piece-labels').evaluate((el: HTMLElement) => el.click());
+    expect((await getState(page)).pieceLabelMode).toBe('all');
+    await expect.poll(badges).toBeGreaterThanOrEqual(30);
+    expect(errors).toEqual([]);
+  });
+
+  test('desktop HUD is one glass dock within 12% of the viewport height', async ({ page, browserName }) => {
+    const errors = collectConsoleErrors(page);
+    await page.setViewportSize({ width: 1470, height: 956 });
+    await openGame(page);
+    await waitIdle(page);
+    // Union height of visible HUD boxes in the top half plus the union height in the bottom half.
+    const hudHeight = () =>
+      page.evaluate(() => {
+        const els = [document.getElementById('hud-left'), ...document.querySelectorAll('#hud-bottom > *')];
+        const mid = window.innerHeight / 2;
+        const spans = { top: [Infinity, -Infinity], bottom: [Infinity, -Infinity] };
+        for (const el of els) {
+          if (!el) continue;
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || Number(cs.opacity) === 0) continue;
+          const r = el.getBoundingClientRect();
+          if (r.height === 0) continue;
+          const half = r.top + r.height / 2 < mid ? spans.top : spans.bottom;
+          half[0] = Math.min(half[0], r.top);
+          half[1] = Math.max(half[1], r.bottom);
+        }
+        const h = ([a, b]: number[]) => (b > a ? b - a : 0);
+        return h(spans.top) + h(spans.bottom);
+      });
+    // The hint pill shows before the first move and collapses after it.
+    await expect(page.locator('#controls-hint')).toBeVisible();
+    await expect(page.locator('#controls-hint')).not.toHaveClass(/is-collapsed/);
+
+    await page.evaluate(() => (window as any).wizardChess.executeChessMove(6, 4, 4, 4));
+    await waitIdle(page);
+    await expect(page.locator('#controls-hint')).toHaveClass(/is-collapsed/);
+    await expect.poll(hudHeight).toBeLessThanOrEqual(114);
+    await expect(page.locator('#hud-left #captured-tray')).toHaveCount(1);
+
+    const look = await page.evaluate(() => {
+      const cs = getComputedStyle(document.getElementById('hud-left')!) as any;
+      return { tier: document.body.dataset.qualityTier, filter: String(cs.backdropFilter || cs.webkitBackdropFilter) };
+    });
+    expect(look.tier).toBe('high');
+    // Only Chromium gets the SVG refraction; Safari and Firefox keep the plain blur.
+    if (browserName === 'chromium') expect(look.filter).toContain('url(');
+    else expect(look.filter).not.toContain('url(');
+    expect(look.filter).toContain('blur');
+
+    // On a narrow desktop window the dock wraps instead of spilling out or running under the watermark.
+    await page.setViewportSize({ width: 900, height: 700 });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const dock = document.getElementById('hud-left')!.getBoundingClientRect();
+          const mark = document.querySelector('.trainer-logo-watermark')?.getBoundingClientRect();
+          const childRight = Math.max(
+            ...[...document.querySelectorAll('#hud-left *')]
+              .map((el) => el.getBoundingClientRect())
+              .filter((r) => r.width > 0)
+              .map((r) => r.right)
+          );
+          return childRight <= dock.right + 0.5 && (!mark || dock.right <= mark.left);
+        })
+      )
+      .toBe(true);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('#mobile-quick-dock')).toBeVisible();
+    await expect(page.locator('#hud-bottom #captured-tray')).toHaveCount(1);
+    expect(errors).toEqual([]);
+  });
 });

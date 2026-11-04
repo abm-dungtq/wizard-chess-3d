@@ -1,8 +1,17 @@
 import * as THREE_NS from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import {
   extractPureBoard,
   getPureLegalMovesForPiece,
@@ -27,6 +36,13 @@ import {
 } from './xiangqiAI.ts';
 import { wizardAudio } from './soundEngine.ts';
 import { runTweens } from './tweenRunner.ts';
+import {
+  downgradeTier,
+  loadVisualSettings,
+  pickQualityTier,
+  resolveMotionLevel,
+  saveVisualSettings
+} from './visualSettings.ts';
 
 /** @type {any} */
 const THREE = THREE_NS;
@@ -224,7 +240,8 @@ export function initWizardChess() {
       powerPreference: 'high-performance',
       preserveDrawingBuffer: isAutomatedTest
     });
-    const maxTargetDpr = Math.min(window.devicePixelRatio || 1, 1.35);
+    const deviceDprCap = Math.min(window.devicePixelRatio || 1, 1.35);
+    let maxTargetDpr = deviceDprCap;
     const coarsePointerQuery = window.matchMedia?.('(pointer: coarse)');
     const isCoarseOrMobile = Boolean(window.innerWidth <= 768 || coarsePointerQuery?.matches);
     const nativeDeviceDpr = window.devicePixelRatio || 1;
@@ -244,6 +261,181 @@ export function initWizardChess() {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.24;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    // Every frame goes through renderFrame and every size change through applyRendererSize, so the
+    // post-processing composer (present on the high and ultra tiers) can never fall out of step.
+    let postComposer = null;
+    function renderFrame(dt = 0) {
+      if (postComposer) postComposer.render(dt);
+      else renderer.render(scene, camera);
+    }
+    function applyRendererSize() {
+      renderer.setPixelRatio(currentActiveDpr);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      if (postComposer) resizePostComposer();
+    }
+    let postPasses = { gtao: null, bokeh: null, bloom: null };
+    let builtTier = null;
+    function resizePostComposer() {
+      if (!postComposer) return;
+      postComposer.setPixelRatio(currentActiveDpr);
+      postComposer.setSize(window.innerWidth, window.innerHeight);
+      // The composer resizes every pass to full size, so GTAO is halved afterwards. Bloom halves its input
+      // internally, so passing half the buffer gives quarter-resolution bloom targets.
+      const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+      if (postPasses.gtao) postPasses.gtao.setSize(Math.ceil(size.x / 2), Math.ceil(size.y / 2));
+      if (postPasses.bloom) postPasses.bloom.setSize(Math.ceil(size.x / 2), Math.ceil(size.y / 2));
+    }
+    function disposePostComposer() {
+      if (!postComposer) return;
+      // GTAOPass.dispose() leaves these two materials behind.
+      postPasses.gtao?.gtaoMaterial?.dispose();
+      postPasses.gtao?.blendMaterial?.dispose();
+      for (const pass of postComposer.passes) pass.dispose?.();
+      if (typeof postComposer.dispose === 'function') {
+        postComposer.dispose();
+      } else {
+        postComposer.renderTarget1.dispose();
+        postComposer.renderTarget2.dispose();
+      }
+      postComposer = null;
+      postPasses = { gtao: null, bokeh: null, bloom: null };
+    }
+    // GTAO and Bokeh redraw the scene with depth/normal override materials, which turns flames, particles and
+    // glass into solid shapes and paints dark AO silhouettes behind them. Those passes skip see-through objects.
+    // The scan runs per frame because attack effects add and remove see-through meshes at any time.
+    const isSeeThrough = (m) => m.transparent || m.depthWrite === false;
+    const hiddenForDepth = [];
+    // clearBackground: Bokeh packs depth into colour, so the scene background colour would read as near depth.
+    function skipSeeThroughObjects(pass, clearBackground = false) {
+      const render = pass.render.bind(pass);
+      pass.render = (...args) => {
+        const background = scene.background;
+        if (clearBackground) scene.background = null;
+        scene.traverseVisible((o) => {
+          const m = o.material;
+          if (m && (Array.isArray(m) ? m.some(isSeeThrough) : isSeeThrough(m))) hiddenForDepth.push(o);
+        });
+        for (const o of hiddenForDepth) o.visible = false;
+        try {
+          render(...args);
+        } finally {
+          for (const o of hiddenForDepth) o.visible = true;
+          hiddenForDepth.length = 0;
+          scene.background = background;
+        }
+      };
+      return pass;
+    }
+    /** ultra: AO + depth of field (off until the kill-cam) + bloom; high: bloom; base: plain render. */
+    function buildPostComposer(tier) {
+      disposePostComposer();
+      builtTier = tier;
+      if (tier === 'base' || isWebGLContextLost) return;
+      const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+      const halfFloatOk =
+        renderer.capabilities.isWebGL2 &&
+        Boolean(renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float'));
+      // Composer targets ignore the canvas antialias flag. SMAA smooths edges instead of MSAA on the target:
+      // multisampled float targets cost ~10 ms a frame on ANGLE Metal at DPR 1.35.
+      const rt = new THREE.WebGLRenderTarget(size.x, size.y, {
+        type: halfFloatOk ? THREE.HalfFloatType : THREE.UnsignedByteType
+      });
+      postComposer = new EffectComposer(renderer, rt);
+      postComposer.addPass(new RenderPass(scene, camera));
+      if (tier === 'ultra') {
+        const gtao = skipSeeThroughObjects(new GTAOPass(scene, camera, size.x, size.y));
+        gtao.blendIntensity = 0.85;
+        gtao.updateGtaoMaterial({ radius: 0.25, distanceExponent: 1, thickness: 1, scale: 1, samples: 8 });
+        postComposer.addPass(gtao);
+        postPasses.gtao = gtao;
+        const bokeh = skipSeeThroughObjects(new BokehPass(scene, camera, { focus: 6, aperture: 0.0025, maxblur: 0.008 }), true);
+        bokeh.enabled = false;
+        postComposer.addPass(bokeh);
+        postPasses.bokeh = bokeh;
+      }
+      const bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.45, 0.88);
+      postComposer.addPass(bloom);
+      postPasses.bloom = bloom;
+      postComposer.addPass(new OutputPass());
+      // SMAA expects tone-mapped sRGB input: its edge threshold and gamma-corrected blend assume display values.
+      postComposer.addPass(new SMAAPass(size.x, size.y));
+      resizePostComposer();
+    }
+
+    // Motion level and quality tier: saved choices win over the OS setting and device detection.
+    function readGpuRendererString() {
+      try {
+        const gl = renderer.getContext();
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        return String((ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)) || '');
+      } catch {
+        return '';
+      }
+    }
+    const gpuRendererString = readGpuRendererString();
+    const detectQualityTier = () =>
+      pickQualityTier({
+        // Not isCoarseOrMobile: a narrow desktop window must not be locked into the base tier.
+        coarsePointer: Boolean(coarsePointerQuery?.matches),
+        maxTouchPoints: navigator.maxTouchPoints || 0,
+        gpuRenderer: gpuRendererString,
+        isAutomatedTest
+      });
+    const reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    let visualSettings = loadVisualSettings();
+    let motionLevel = resolveMotionLevel(visualSettings.motion, Boolean(reducedMotionQuery?.matches));
+    let qualityPreference = visualSettings.quality || 'auto';
+    let qualityTier = qualityPreference === 'auto' ? detectQualityTier() : qualityPreference;
+    let qualityTierSource = qualityPreference === 'auto' ? 'auto' : 'saved';
+    let slowFrameSeconds = 0;
+    let lastTierAdjustTime = 0;
+
+    // CSS reads the tier and motion level from <body> (the HUD glass drops its refraction on `base`).
+    function syncVisualDataset() {
+      document.body.dataset.qualityTier = qualityTier;
+      document.body.dataset.motion = motionLevel;
+    }
+    syncVisualDataset();
+    // navigator.userAgentData exists only in Chromium, so Safari and Firefox never get the SVG refraction.
+    const supportsSvgBackdrop =
+      'userAgentData' in navigator && window.CSS?.supports?.('backdrop-filter', 'url(#a)') === true;
+    document.body.classList.toggle('svg-backdrop', supportsSvgBackdrop);
+
+    function announceVisualSettings() {
+      syncVisualDataset();
+      window.dispatchEvent(
+        new CustomEvent('wizardchess:visual-settings', {
+          detail: { motionLevel, qualityTier, qualityTierSource, qualityPreference }
+        })
+      );
+    }
+
+    function setMotionLevel(level, persist = true) {
+      if (level !== 'full' && level !== 'quick' && level !== 'off') return motionLevel;
+      motionLevel = level;
+      if (persist) visualSettings = saveVisualSettings({ motion: level });
+      announceVisualSettings();
+      return motionLevel;
+    }
+
+    /** `auto` re-runs device detection; any other value is saved as the user's choice. */
+    function setQualityTier(preference, persist = true) {
+      if (preference !== 'auto' && preference !== 'ultra' && preference !== 'high' && preference !== 'base') {
+        return qualityTier;
+      }
+      qualityPreference = preference;
+      qualityTier = preference === 'auto' ? detectQualityTier() : preference;
+      qualityTierSource = preference === 'auto' ? 'auto' : 'saved';
+      slowFrameSeconds = 0;
+      if (persist) visualSettings = saveVisualSettings({ quality: preference });
+      announceVisualSettings();
+      return qualityTier;
+    }
+
+    reducedMotionQuery?.addEventListener?.('change', (e) => {
+      if (!visualSettings.motion) setMotionLevel(e.matches ? 'off' : 'full', false);
+    });
     if (renderer.debug) {
       renderer.debug.checkShaderErrors = false;
     }
@@ -254,6 +446,7 @@ export function initWizardChess() {
       (e) => {
         e.preventDefault();
         isWebGLContextLost = true;
+        disposePostComposer();
       },
       false
     );
@@ -273,7 +466,8 @@ export function initWizardChess() {
           }
         });
         renderer.shadowMap.needsUpdate = true;
-        renderer.render(scene, camera);
+        buildPostComposer(qualityTier);
+        renderFrame();
       },
       false
     );
@@ -318,7 +512,28 @@ export function initWizardChess() {
     }
 
     const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.22, 65);
-    camera.position.set(0, 7.35, 3.95);
+    const startPose = getSpectatorPose('w', getPortraitFramingFactor());
+    camera.position.copy(startPose.pos);
+
+    // `ultra` spends its frame budget on post-processing, so on desktop it renders at a lower DPR cap.
+    // A tier change only lowers the current DPR; the adaptive path raises it back toward the cap when frames are fast.
+    function applyDesktopDprCap(tier) {
+      if (isCoarseOrMobile) return;
+      maxTargetDpr = Math.min(deviceDprCap, tier === 'ultra' ? 1.25 : 1.35);
+      if (currentActiveDpr > maxTargetDpr) {
+        currentActiveDpr = maxTargetDpr;
+        applyRendererSize();
+      }
+    }
+
+    // The settings event only fires on changes, so the first build reads the tier directly.
+    applyDesktopDprCap(qualityTier);
+    buildPostComposer(qualityTier);
+    window.addEventListener('wizardchess:visual-settings', (e) => {
+      if (e.detail.qualityTier === builtTier) return;
+      applyDesktopDprCap(e.detail.qualityTier);
+      buildPostComposer(e.detail.qualityTier);
+    });
 
     function getPortraitFramingFactor() {
       const w = Math.max(1, window.innerWidth || 1280);
@@ -367,7 +582,7 @@ export function initWizardChess() {
     orbitControls.minPolarAngle = 0.12;
     orbitControls.minDistance = 1.45;
     orbitControls.maxDistance = 12.0;
-    orbitControls.target.set(0, 0.78, -0.06);
+    orbitControls.target.copy(startPose.lookAt);
     orbitControls.update();
     orbitControls.enabled = !isCameraLocked;
 
@@ -376,8 +591,8 @@ export function initWizardChess() {
     function clearCameraPresetActive() {
       if (camPresetActiveCleared) return;
       if (!camPresetButtons) {
-        const found = document.querySelectorAll('#btn-cam-player, #btn-cam-wide, #btn-cam-top, #btn-cam-side');
-        if (found.length === 4) camPresetButtons = found;
+        const found = document.querySelectorAll('#btn-cam-spectator, #btn-cam-player, #btn-cam-wide, #btn-cam-top, #btn-cam-side');
+        if (found.length === 5) camPresetButtons = found;
       }
       const buttons = camPresetButtons || [];
       for (const b of buttons) b.classList.remove('active');
@@ -1139,6 +1354,19 @@ export function initWizardChess() {
       emissive: 0x222832,
       emissiveIntensity: 0.25
     });
+
+    // Board and altar gold follows the white trim's colour, but never as polished as piece trim:
+    // under bloom, a mirror-like rail reflects the cathedral light as a glare across the board edge.
+    const BOARD_GOLD_MIN_ROUGHNESS = 0.34;
+    const boardGoldTrimMat = goldTrimMat.clone();
+    function syncBoardGoldTrim() {
+      boardGoldTrimMat.color.copy(goldTrimMat.color);
+      boardGoldTrimMat.metalness = goldTrimMat.metalness;
+      boardGoldTrimMat.roughness = Math.max(goldTrimMat.roughness, BOARD_GOLD_MIN_ROUGHNESS);
+      boardGoldTrimMat.emissive.copy(goldTrimMat.emissive);
+      boardGoldTrimMat.emissiveIntensity = goldTrimMat.emissiveIntensity;
+    }
+    syncBoardGoldTrim();
 
     const blackTrimMat = goldTrimMat.clone();
     const blackSteelMat = forgedSteelMat.clone();
@@ -2082,6 +2310,7 @@ export function initWizardChess() {
     };
 
     function applyPieceTheme(themeId, sideOption = 'both') {
+      endKillCam(true);
       const theme = PIECE_THEMES[themeId] || PIECE_THEMES.hogwarts;
       currentPieceThemeId = theme.id;
       const applyMat = (mat, cfg) => {
@@ -2124,6 +2353,7 @@ export function initWizardChess() {
           applyMat(whiteBishopAccentMat, CHESS_DEFAULT_ROLE_MATERIALS.whiteBishopAccent);
         }
       }
+      syncBoardGoldTrim();
       if (sideOption === 'both' || sideOption === 'b') {
         activeSkinBlack = theme.id;
         if (useXiangqiCrimsonObsidian) {
@@ -2250,6 +2480,9 @@ export function initWizardChess() {
     // Asset Loading (Cathedral GLB + 12 Rigged Piece GLBs)
     // =========================================================================
     const gltfLoader = new GLTFLoader();
+    gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+    // Relative path, like the model URLs, so the game also works from a sub-path.
+    gltfLoader.setKTX2Loader(new KTX2Loader().setTranscoderPath('./assets/basis/').detectSupport(renderer));
     const pieceTemplates = {};
     const activeMixers = [];
     const shatterDebris = [];
@@ -2418,8 +2651,8 @@ export function initWizardChess() {
       const hCurbGeo = new THREE.BoxGeometry(halfDeck * 2 + outerCurbW * 2, outerCurbH, outerCurbW);
       const vCurbGeo = new THREE.BoxGeometry(outerCurbW, outerCurbH, halfDeck * 2);
       for (const s of [-1, 1]) {
-        addStaticAltarMesh(hCurbGeo, goldTrimMat, 0, 0.752, s * halfDeck);
-        addStaticAltarMesh(vCurbGeo, goldTrimMat, s * halfDeck, 0.752, 0);
+        addStaticAltarMesh(hCurbGeo, boardGoldTrimMat, 0, 0.752, s * halfDeck);
+        addStaticAltarMesh(vCurbGeo, boardGoldTrimMat, s * halfDeck, 0.752, 0);
       }
 
       // 4 Corner Sentinel Relic Pylons with floating Arcane Crystals at (±2.02, 0.75, ±2.02)
@@ -2437,7 +2670,7 @@ export function initWizardChess() {
       cornerCoords.forEach(([cx, cz], idx) => {
         addStaticAltarMesh(pylonBaseGeo, darkObsidianPlinthMat, cx, 0.81, cz);
         const capRing = new THREE.CylinderGeometry(0.12, 0.12, 0.024, 8);
-        addStaticAltarMesh(capRing, goldTrimMat, cx, 0.885, cz);
+        addStaticAltarMesh(capRing, boardGoldTrimMat, cx, 0.885, cz);
 
         const crystalMat = sanctumMoatGlowMat.clone();
         const crystalMesh = new THREE.Mesh(crystalGeo, crystalMat);
@@ -2445,7 +2678,7 @@ export function initWizardChess() {
         crystalMesh.raycast = () => {};
         sanctumAltarGroup.add(crystalMesh);
 
-        const ringMesh = new THREE.Mesh(orbitRingGeo, goldTrimMat);
+        const ringMesh = new THREE.Mesh(orbitRingGeo, boardGoldTrimMat);
         ringMesh.position.set(cx, 1.04, cz);
         ringMesh.rotation.x = Math.PI * 0.35;
         ringMesh.raycast = () => {};
@@ -3029,7 +3262,7 @@ export function initWizardChess() {
       const hRimGeo = new THREE.BoxGeometry(halfW * 2 + rimW * 2, rimH, rimW);
       const vRimGeo = new THREE.BoxGeometry(rimW, rimH, halfD * 2);
       for (const s of [-1, 1]) {
-        const hBar = new THREE.Mesh(hRimGeo, goldTrimMat);
+        const hBar = new THREE.Mesh(hRimGeo, boardGoldTrimMat);
         hBar.position.set(0, BOARD_SURFACE_Y - rimH * 0.42, s * (halfD + rimW * 0.5));
         hBar.receiveShadow = true;
         hBar.raycast = () => {};
@@ -3037,7 +3270,7 @@ export function initWizardChess() {
         hBar.matrixAutoUpdate = false;
         xiangqiBoardDeckGroup.add(hBar);
 
-        const vBar = new THREE.Mesh(vRimGeo, goldTrimMat);
+        const vBar = new THREE.Mesh(vRimGeo, boardGoldTrimMat);
         vBar.position.set(s * (halfW + rimW * 0.5), BOARD_SURFACE_Y - rimH * 0.42, 0);
         vBar.receiveShadow = true;
         vBar.raycast = () => {};
@@ -3097,7 +3330,7 @@ export function initWizardChess() {
       const rankLineGeo = new THREE.BoxGeometry(boardW + lineThick, lineH, lineThick);
       for (let r = 0; r < 10; r++) {
         const z = (r - 4.5) * XIANGQI_SQ_SIZE;
-        const rLine = new THREE.Mesh(rankLineGeo, goldTrimMat);
+        const rLine = new THREE.Mesh(rankLineGeo, boardGoldTrimMat);
         rLine.position.set(0, BOARD_SURFACE_Y + 0.0028, z);
         rLine.raycast = () => {};
         rLine.updateMatrix();
@@ -3110,7 +3343,7 @@ export function initWizardChess() {
       for (let c = 0; c < 9; c++) {
         const x = (c - 4.0) * XIANGQI_SQ_SIZE;
         if (c === 0 || c === 8) {
-          const fLine = new THREE.Mesh(fullFileGeo, goldTrimMat);
+          const fLine = new THREE.Mesh(fullFileGeo, boardGoldTrimMat);
           fLine.position.set(x, BOARD_SURFACE_Y + 0.0028, 0);
           fLine.raycast = () => {};
           fLine.updateMatrix();
@@ -3118,7 +3351,7 @@ export function initWizardChess() {
           xiangqiBoardDeckGroup.add(fLine);
         } else {
           for (const bankSign of [-1, 1]) {
-            const hLine = new THREE.Mesh(halfFileGeo, goldTrimMat);
+            const hLine = new THREE.Mesh(halfFileGeo, boardGoldTrimMat);
             hLine.position.set(x, BOARD_SURFACE_Y + 0.0028, bankSign * 2.5 * XIANGQI_SQ_SIZE);
             hLine.raycast = () => {};
             hLine.updateMatrix();
@@ -3133,7 +3366,7 @@ export function initWizardChess() {
       const diagGeo = new THREE.BoxGeometry(lineThick * 0.9, lineH, diagLen);
       for (const palaceZ of [-3.5 * XIANGQI_SQ_SIZE, 3.5 * XIANGQI_SQ_SIZE]) {
         for (const rotSign of [-1, 1]) {
-          const dMesh = new THREE.Mesh(diagGeo, goldTrimMat);
+          const dMesh = new THREE.Mesh(diagGeo, boardGoldTrimMat);
           dMesh.position.set(0, BOARD_SURFACE_Y + 0.003, palaceZ);
           dMesh.rotation.y = rotSign * (Math.PI / 4);
           dMesh.raycast = () => {};
@@ -3154,7 +3387,7 @@ export function initWizardChess() {
       for (const [fr, fc] of fiducialCoords) {
         const fx = (fc - 4.0) * XIANGQI_SQ_SIZE;
         const fz = (fr - 4.5) * XIANGQI_SQ_SIZE;
-        const fMesh = new THREE.Mesh(fidGeo, goldTrimMat);
+        const fMesh = new THREE.Mesh(fidGeo, boardGoldTrimMat);
         fMesh.position.set(fx, BOARD_SURFACE_Y + 0.0034, fz);
         fMesh.raycast = () => {};
         fMesh.updateMatrix();
@@ -3182,7 +3415,7 @@ export function initWizardChess() {
           xiangqiBoardDeckGroup.add(padMesh);
           xiangqiSquareMeshes.push(padMesh);
 
-          const studMesh = new THREE.Mesh(nodeStudGeo, goldTrimMat);
+          const studMesh = new THREE.Mesh(nodeStudGeo, boardGoldTrimMat);
           studMesh.position.set(ix, BOARD_SURFACE_Y + 0.0025, iz);
           studMesh.raycast = () => {};
           studMesh.updateMatrix();
@@ -3235,7 +3468,7 @@ export function initWizardChess() {
       const horizGeo = new THREE.BoxGeometry(halfB * 2 + rimW * 2, rimH, rimW);
       const vertGeo = new THREE.BoxGeometry(rimW, rimH, halfB * 2);
       for (const s of [-1, 1]) {
-        const hBar = new THREE.Mesh(horizGeo, goldTrimMat);
+        const hBar = new THREE.Mesh(horizGeo, boardGoldTrimMat);
         hBar.position.set(0, BOARD_SURFACE_Y - rimH * 0.42, s * (halfB + rimW * 0.5));
         hBar.receiveShadow = true;
         hBar.raycast = () => {};
@@ -3243,7 +3476,7 @@ export function initWizardChess() {
         hBar.matrixAutoUpdate = false;
         chessBoardDeckGroup.add(hBar);
 
-        const vBar = new THREE.Mesh(vertGeo, goldTrimMat);
+        const vBar = new THREE.Mesh(vertGeo, boardGoldTrimMat);
         vBar.position.set(s * (halfB + rimW * 0.5), BOARD_SURFACE_Y - rimH * 0.42, 0);
         vBar.receiveShadow = true;
         vBar.raycast = () => {};
@@ -3499,43 +3732,24 @@ export function initWizardChess() {
       return setFloorStoneLook(0);
     }
 
-    const ASSET_CACHE_VER = 'v=masterwork_v2';
+    const ASSET_CACHE_VER = 'v=meshopt_v1';
+
+    // Cloudflare does not compress .glb, so models ship as .glb.gz and are inflated here.
+    async function fetchGlbModel(baseName) {
+      const res = await fetch(`./assets/glb/${baseName}.glb.gz?${ASSET_CACHE_VER}`);
+      // Unknown paths fall back to index.html, so an HTML answer is a missing model.
+      if (!res.ok || (res.headers.get('content-type') || '').includes('text/html')) {
+        throw new Error(`Failed to fetch ${baseName}`);
+      }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      // A server that adds Content-Encoding: gzip hands over bytes the browser already inflated.
+      if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return bytes.buffer;
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+      return new Response(stream).arrayBuffer();
+    }
 
     async function loadGltfModel(baseName) {
-      let arrayBuffer = null;
-      try {
-        const resB64 = await fetch(`./assets/glb/${baseName}.glb.gz.b64?${ASSET_CACHE_VER}`);
-        if (resB64.ok) {
-          const b64Text = (await resB64.text()).trim();
-          if (b64Text.length > 64) {
-            let gzBytes = null;
-            if (typeof Uint8Array.fromBase64 === 'function') {
-              try {
-                gzBytes = Uint8Array.fromBase64(b64Text);
-              } catch (e) {
-                gzBytes = null;
-              }
-            }
-            if (!gzBytes) {
-              const binStr = atob(b64Text);
-              gzBytes = new Uint8Array(binStr.length);
-              for (let i = 0; i < binStr.length; i++) {
-                gzBytes[i] = binStr.charCodeAt(i);
-              }
-            }
-            const ds = new DecompressionStream('gzip');
-            const stream = new Blob([gzBytes]).stream().pipeThrough(ds);
-            arrayBuffer = await new Response(stream).arrayBuffer();
-          }
-        }
-      } catch (e) {}
-
-      if (!arrayBuffer) {
-        const resGlb = await fetch(`./assets/glb/${baseName}.glb?${ASSET_CACHE_VER}`);
-        if (!resGlb.ok) throw new Error(`Failed to fetch ${baseName}`);
-        arrayBuffer = await resGlb.arrayBuffer();
-      }
-
+      const arrayBuffer = await fetchGlbModel(baseName);
       return new Promise((resolve, reject) => {
         gltfLoader.parse(arrayBuffer, './assets/glb/', (gltf) => resolve(gltf), (err) => reject(err));
       });
@@ -4215,6 +4429,13 @@ export function initWizardChess() {
       const clampedPos = targetPos.clone();
       const clampedLook = targetLookAt.clone();
       enforceCathedralBoundsAndSolidColumns(clampedPos, clampedPos, clampedLook);
+      if (motionLevel === 'off') {
+        activeCamTransition = null;
+        camera.position.copy(clampedPos);
+        orbitControls.target.copy(clampedLook);
+        flushOrbitControlsDamping();
+        return;
+      }
       activeCamTransition = {
         startPos: camera.position.clone(),
         endPos: clampedPos,
@@ -4222,6 +4443,15 @@ export function initWizardChess() {
         endTarget: clampedLook,
         elapsed: 0,
         duration: Math.max(0.05, duration)
+      };
+    }
+
+    /** 3/4 view from one side's corner. Pure: called before most state exists to set the start-up camera. */
+    function getSpectatorPose(side, tPortrait) {
+      const s = side === 'b' ? -1 : 1;
+      return {
+        pos: new THREE.Vector3(s * 1.25 * (1 - tPortrait), 4.6 + tPortrait * 2.6, s * (4.55 + tPortrait * 2.3)),
+        lookAt: new THREE.Vector3(0, 0.55, s * (0.15 - tPortrait * 0.2))
       };
     }
 
@@ -4645,8 +4875,12 @@ export function initWizardChess() {
     // Steady 3D Combat Camera (disabled zoom-in/out by default to eliminate motion sickness & lag feel)
     let combatCameraZoomEnabled = false;
     // 3-Layer Piece Identification & Readability System ('smart' | 'all' | 'tap')
-    let pieceLabelMode = 'smart';
+    let pieceLabelMode = 'tap';
     let inspectedSquare = null; // { r, c } | null
+    // Piece under a real mouse pointer; the raycast runs at most once per frame, after the pointer moved.
+    let hoveredSquare = null; // { r, c } | null
+    let hoverPending = null; // { x, y } | null
+    const hoverCapable = window.matchMedia?.('(hover: hover) and (pointer: fine)')?.matches === true;
     const overheadBadgeSlots = [];
     const _overheadProjVec = new THREE.Vector3();
 
@@ -4682,12 +4916,12 @@ export function initWizardChess() {
       const modeNames = {
         smart: 'Thông Minh',
         all: 'Tất Cả (32)',
-        tap: 'Khi Chạm'
+        tap: 'Khi Chọn'
       };
       const shortNames = {
         smart: 'Bật',
         all: 'Tất Cả',
-        tap: 'Chạm'
+        tap: 'Chọn'
       };
       const btnLabels = document.getElementById('btn-piece-labels');
       if (btnLabels) {
@@ -4711,7 +4945,7 @@ export function initWizardChess() {
     }
 
     function cyclePieceLabelMode() {
-      const order = ['smart', 'all', 'tap'];
+      const order = ['tap', 'smart', 'all'];
       const idx = order.indexOf(pieceLabelMode);
       const nextMode = order[(idx + 1) % order.length];
       return setPieceLabelMode(nextMode);
@@ -4751,8 +4985,10 @@ export function initWizardChess() {
               )
           );
 
+          const isHovered = Boolean(hoveredSquare && hoveredSquare.r === r && hoveredSquare.c === c);
+
           let shouldShow = false;
-          if (isSelected || isInspected || isCaptureTarget) {
+          if (isSelected || isInspected || isCaptureTarget || isHovered) {
             shouldShow = true;
           } else if (pieceLabelMode === 'all') {
             shouldShow = true;
@@ -4789,8 +5025,18 @@ export function initWizardChess() {
             ? `${p.color === 'w' ? meta.glyphW : meta.glyphB} ${pieceShortVi}`
             : pieceShortVi;
           const cls = `piece-overhead-badge faction-${p.color}${
-            p.type === 'pawn' && !isSelected && !isInspected && !isCaptureTarget ? ' is-pawn-compact' : ''
-          }${isCaptureTarget ? ' is-capture-target' : isSelected ? ' is-selected' : isInspected ? ' is-inspected' : ''}`;
+            p.type === 'pawn' && !isSelected && !isInspected && !isCaptureTarget && !isHovered ? ' is-pawn-compact' : ''
+          }${
+            isCaptureTarget
+              ? ' is-capture-target'
+              : isSelected
+                ? ' is-selected'
+                : isInspected
+                  ? ' is-inspected'
+                  : isHovered
+                    ? ' is-hovered'
+                    : ''
+          }`;
 
           if (slot.lastGlyph !== glyphStr) {
             slot.glyphEl.textContent = glyphStr;
@@ -4872,6 +5118,61 @@ export function initWizardChess() {
         }
       }
     }
+
+    // Kill-cam: a skippable look at the falling king. It never sets isAnimatingMove, so moves are never blocked.
+    let cinematicActive = false;
+    let cinematicRestore = null;
+    let cinematicTimer = 0;
+    const KILL_CAM_HOLD_S = 3.2; // plus the 0.8 s return keeps the whole kill-cam within 4 s
+
+    function startKillCam(kingWorldPos, fallDir, forwardDirZ) {
+      if (motionLevel !== 'full' || heldCameraKeys.size > 0) return;
+      if (cinematicActive) endKillCam(true);
+      // Return to where a pending preset tween was heading (e.g. the pass-and-play side flip), not where it was.
+      cinematicRestore = {
+        pos: (activeCamTransition?.endPos ?? camera.position).clone(),
+        target: (activeCamTransition?.endTarget ?? orbitControls.target).clone()
+      };
+      cinematicActive = true;
+      cinematicTimer = 0;
+      orbitControls.enabled = false;
+      const camPos = new THREE.Vector3(
+        kingWorldPos.x + (kingWorldPos.x >= 0 ? -1.35 : 1.35),
+        BOARD_SURFACE_Y + 1.15,
+        kingWorldPos.z + forwardDirZ * 1.45
+      );
+      smoothCameraTo(
+        camPos,
+        new THREE.Vector3(kingWorldPos.x + fallDir.x * 0.22, BOARD_SURFACE_Y + 0.18, kingWorldPos.z + fallDir.z * 0.22),
+        0.95
+      );
+      if (postPasses.bokeh) {
+        postPasses.bokeh.uniforms.focus.value = (activeCamTransition?.endPos ?? camera.position).distanceTo(kingWorldPos);
+        postPasses.bokeh.enabled = true;
+      }
+    }
+
+    function endKillCam(immediate) {
+      if (!cinematicActive) return;
+      if (postPasses.bokeh) postPasses.bokeh.enabled = false;
+      if (immediate) {
+        activeCamTransition = null;
+        camera.position.copy(cinematicRestore.pos);
+        orbitControls.target.copy(cinematicRestore.target);
+        flushOrbitControlsDamping();
+      } else {
+        smoothCameraTo(cinematicRestore.pos, cinematicRestore.target, 0.8);
+      }
+      orbitControls.enabled = !isCameraLocked;
+      cinematicActive = false;
+      cinematicRestore = null;
+    }
+    // Any click, tap or key skips the kill-cam; the event still reaches its normal handlers.
+    const skipKillCam = () => {
+      if (cinematicActive) endKillCam(true);
+    };
+    document.addEventListener('pointerdown', skipKillCam, { capture: true, passive: true });
+    document.addEventListener('keydown', skipKillCam, { capture: true, passive: true });
 
     let checkmateState = {
       active: false,
@@ -4964,6 +5265,7 @@ export function initWizardChess() {
       clearSquareHighlights();
       selectedSquare = null;
       inspectedSquare = null;
+      hoveredSquare = null;
       validMoves = [];
       isAnimatingMove = false;
       if (snap.gameVariant === 'xiangqi' || snap.gameVariant === 'chess') {
@@ -5033,6 +5335,7 @@ export function initWizardChess() {
     }
 
     function undoLastMove() {
+      endKillCam(true);
       if (pendingPromotion) {
         hidePromotionModal();
         return true;
@@ -5075,6 +5378,7 @@ export function initWizardChess() {
     }
 
     function resetChessBoard(orientCamera = true, preserveScript = false) {
+      endKillCam(true);
       cancelPendingAISearch();
       hidePromotionModal();
       preMoveHighlightTask = null;
@@ -5097,6 +5401,7 @@ export function initWizardChess() {
       clearSquareHighlights();
       selectedSquare = null;
       inspectedSquare = null;
+      hoveredSquare = null;
       validMoves = [];
       currentTurn = 'w';
       if (gameMode === 'single' && isPassAndPlay) {
@@ -5147,9 +5452,18 @@ export function initWizardChess() {
         const viewSide = playerColor === 'b' ? 'b' : 'w';
         playerCamSide = viewSide;
         overheadCamSide = viewSide;
+        const anyCamActive = camButtons.some((id) => document.getElementById(id)?.classList.contains('active'));
         if (document.getElementById('btn-cam-player')?.classList.contains('active')) {
           setActiveCamButton('btn-cam-player');
           setCameraForSide(viewSide, false);
+        } else if (document.getElementById('btn-cam-spectator')?.classList.contains('active') || !anyCamActive) {
+          spectatorCamSide = viewSide;
+          setActiveCamButton('btn-cam-spectator');
+          const pose = getSpectatorPose(viewSide, getPortraitFramingFactor());
+          activeCamTransition = null;
+          camera.position.copy(pose.pos);
+          orbitControls.target.copy(pose.lookAt);
+          flushOrbitControlsDamping();
         } else {
           setActiveCamButton('btn-cam-top');
           setOverheadCameraForSide(viewSide, false);
@@ -6275,6 +6589,8 @@ export function initWizardChess() {
           ? boardToWorld(matchedLegal.legR, matchedLegal.legC)
           : null;
 
+      // The desktop hint pill fades out after the first move, leaving the top dock as the only HUD bar.
+      document.getElementById('controls-hint')?.classList.add('is-collapsed');
       // Save board state snapshot (including pre-move scriptCursor & scriptDeviated) so Undo / Left Arrow can step backward
       moveHistory.push({
         snapshot: captureBoardSnapshot(),
@@ -6964,7 +7280,11 @@ export function initWizardChess() {
                 piece.type === 'elephant' ||
                 piece.type === 'advisor'
               ) {
-                wizardAudio.playSignatureAttack(piece.type, 'windup');
+                wizardAudio.playSignatureAttack(piece.type, 'windup', {
+                  x: piece.mesh.position.x,
+                  y: BOARD_SURFACE_Y,
+                  z: piece.mesh.position.z
+                });
                 spawnSignatureCombatVFX(piece.type, 'windup', piece.mesh.position, endPos, dirX, dirZ, piece.color);
               }
             }
@@ -7134,8 +7454,9 @@ export function initWizardChess() {
               (atkClipTime >= CONTACT_CLIP_TIME || elapsed >= tContact + 0.06)
             ) {
               defenderFlinchTriggered = true;
-              wizardAudio.playWeaponClash();
-              wizardAudio.playSignatureAttack(piece.type, 'contact1');
+              const hitAt = { x: endPos.x, y: BOARD_SURFACE_Y, z: endPos.z };
+              wizardAudio.playWeaponClash(hitAt);
+              wizardAudio.playSignatureAttack(piece.type, 'contact1', hitAt);
               spawnSignatureCombatVFX(piece.type, 'contact1', piece.mesh.position, endPos, dirX, dirZ, piece.color);
               if (atkProfile.hitStopDuration > 0) {
                 hitStopRemaining = atkProfile.hitStopDuration;
@@ -7158,7 +7479,7 @@ export function initWizardChess() {
               atkClipTime >= SECOND_CONTACT_CLIP_TIME
             ) {
               secondHitTriggered = true;
-              wizardAudio.playSignatureAttack(piece.type, 'contact2');
+              wizardAudio.playSignatureAttack(piece.type, 'contact2', { x: endPos.x, y: BOARD_SURFACE_Y, z: endPos.z });
               spawnSignatureCombatVFX(piece.type, 'contact2', piece.mesh.position, endPos, dirX, dirZ, piece.color);
               impactFlashLight.intensity = 6.2;
             }
@@ -7166,8 +7487,9 @@ export function initWizardChess() {
             // Signature Finisher Burst: defender explodes with piece-specific VFX & directional/vortex debris!
             if (!shatterTriggered && (atkClipTime >= BLOW_CLIP_TIME || elapsed >= tImpact + 0.06)) {
               shatterTriggered = true;
-              wizardAudio.playStoneShatter();
-              wizardAudio.playSignatureAttack(piece.type, 'finisher');
+              const finisherAt = { x: endPos.x, y: BOARD_SURFACE_Y, z: endPos.z };
+              wizardAudio.playStoneShatter(finisherAt);
+              wizardAudio.playSignatureAttack(piece.type, 'finisher', finisherAt);
               impactActualTime = elapsed;
               postShatterPiecePos.copy(piece.mesh.position);
               spawnSignatureCombatVFX(piece.type, 'finisher', piece.mesh.position, endPos, dirX, dirZ, piece.color);
@@ -7191,7 +7513,7 @@ export function initWizardChess() {
 
             // Piece-scaled impact camera tremor right when the blow shatters the defender (only when combatCameraZoomEnabled is explicitly opted in)
             const shakeSpan = piece.type === 'rook' || piece.type === 'king' || piece.type === 'cannon' ? 0.34 : 0.26;
-            if (activeDuelCamSwoop && shatterTriggered && elapsed >= impactActualTime && elapsed <= impactActualTime + shakeSpan) {
+            if (activeDuelCamSwoop && motionLevel !== 'off' && shatterTriggered && elapsed >= impactActualTime && elapsed <= impactActualTime + shakeSpan) {
               const shakeProgress = (elapsed - impactActualTime) / shakeSpan;
               const decay = (1 - shakeProgress) * (1 - shakeProgress);
               const baseAmp = piece.type === 'rook' || piece.type === 'cannon' ? 0.046 : piece.type === 'king' ? 0.042 : 0.026;
@@ -8181,6 +8503,8 @@ export function initWizardChess() {
           ),
           0.95
         );
+      } else {
+        startKillCam(homePos, { x: fallDirX, z: fallDirZ }, forwardDirZ);
       }
 
       const RIM_RADIUS = 0.135;    // Pedestal bottom rim radius so the lower edge stays grounded on the board
@@ -8255,7 +8579,7 @@ export function initWizardChess() {
           applyKingTopplePose(theta, 0);
 
           // Subtle damped camera tremor when the heavy stone King crashes onto the altar board (only when combatCameraZoomEnabled is opted in)
-          if (combatCameraZoomEnabled && elapsed <= tImpact + 0.28) {
+          if (combatCameraZoomEnabled && motionLevel !== 'off' && elapsed <= tImpact + 0.28) {
             const sProg = (elapsed - tImpact) / 0.28;
             const decay = (1 - sProg) * (1 - sProg);
             camera.position.y += Math.cos(sProg * Math.PI * 8) * 0.022 * decay;
@@ -8623,6 +8947,19 @@ export function initWizardChess() {
       );
     }
 
+    // The first gesture anywhere (HUD buttons included) starts audio, so the first move does not stall on context start-up.
+    const AUDIO_UNLOCK_EVENTS = ['pointerdown', 'keydown', 'touchend'];
+    const unlockAudioOnGesture = () => {
+      if (!wizardAudio.unlock()) return;
+      if (wizardAudio.getState().contextState !== 'running') return;
+      for (const type of AUDIO_UNLOCK_EVENTS) {
+        document.removeEventListener(type, unlockAudioOnGesture, { capture: true });
+      }
+    };
+    for (const type of AUDIO_UNLOCK_EVENTS) {
+      document.addEventListener(type, unlockAudioOnGesture, { capture: true, passive: true });
+    }
+
     renderer.domElement.addEventListener('pointerdown', (e) => {
       wizardAudio.unlock();
       pointerDownPos = {
@@ -8631,6 +8968,53 @@ export function initWizardChess() {
         pointerType: e.pointerType || 'mouse'
       };
     });
+
+    const hoverRayTargets = [];
+
+    function processPendingHover() {
+      // While a move or the kill-cam plays, keep the last pointer position so it is picked once the scene settles.
+      if (!hoverPending || isAnimatingMove || cinematicActive) return;
+      const { x, y } = hoverPending;
+      hoverPending = null;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((x - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((y - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      // Piece hitboxes are cheap cylinder proxies (never the skinned meshes), so hovering a piece's body picks that piece.
+      hoverRayTargets.length = 0;
+      for (let r = 0; r < getBoardRows(); r++) {
+        for (let c = 0; c < getBoardCols(); c++) {
+          const p = boardState[r]?.[c];
+          if (p && p.hitbox) hoverRayTargets.push(p.hitbox);
+        }
+      }
+      for (const sq of getActiveBoardSquareMeshes()) hoverRayTargets.push(sq);
+      const hits = raycaster.intersectObjects(hoverRayTargets, false);
+      const coords = hits.length > 0 ? extractBoardCoordsFromHit(hits[0].object) : null;
+      const next = coords && boardState[coords.r]?.[coords.c] ? { r: coords.r, c: coords.c } : null;
+      if (next?.r !== hoveredSquare?.r || next?.c !== hoveredSquare?.c) {
+        hoveredSquare = next;
+        updatePieceOverheadOverlay();
+      }
+    }
+
+    if (hoverCapable) {
+      renderer.domElement.addEventListener(
+        'pointermove',
+        (e) => {
+          if (e.pointerType === 'touch') return;
+          hoverPending = { x: e.clientX, y: e.clientY };
+        },
+        { passive: true }
+      );
+      renderer.domElement.addEventListener('pointerleave', () => {
+        hoverPending = null;
+        if (hoveredSquare) {
+          hoveredSquare = null;
+          updatePieceOverheadOverlay();
+        }
+      });
+    }
 
     renderer.domElement.addEventListener('pointerup', (e) => {
       const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
@@ -9367,6 +9751,7 @@ export function initWizardChess() {
     // Camera Presets & HUD Controls
     // =========================================================================
     const camButtons = [
+      'btn-cam-spectator',
       'btn-cam-player',
       'btn-cam-top',
       'btn-cam-side',
@@ -9381,15 +9766,40 @@ export function initWizardChess() {
       }
       const btnQuickCam = document.getElementById('btn-quick-cam');
       if (btnQuickCam) {
-        btnQuickCam.classList.toggle('active', activeId === 'btn-cam-player' || activeId === 'btn-cam-top');
+        btnQuickCam.classList.toggle('active', activeId === 'btn-cam-spectator' || activeId === 'btn-cam-top');
         btnQuickCam.textContent = activeId === 'btn-cam-top' ? '📐 Góc: Top' : '📐 Góc: 3D';
       }
     }
 
     let playerCamSide = 'w';     // toggles 'w' (White) <-> 'b' (Black) on repeat click of Player Cam
+    let spectatorCamSide = 'w';  // toggles 'w' (White) <-> 'b' (Black) on repeat click of the 3/4 view
     let overheadCamSide = 'w';   // toggles 'w' (White) <-> 'b' (Black) on repeat click of Overhead
     let sideCamSide = 'east';    // toggles 'east' (+X) <-> 'west' (-X) on repeat click of Side
     let cathedralWideSide = 'north'; // toggles 'north' (Rose Window) <-> 'south' (Narthex Triptych) on repeat click of Cathedral
+
+    /** Screen positions (NDC) of the four outer corners of the board top surface. */
+    function projectBoardCorners() {
+      const halfW = (getBoardCols() * getActiveSqSize()) / 2;
+      const halfD = (getBoardRows() * getActiveSqSize()) / 2;
+      camera.updateMatrixWorld();
+      return [
+        [-halfW, -halfD],
+        [halfW, -halfD],
+        [-halfW, halfD],
+        [halfW, halfD]
+      ].map(([x, z]) => {
+        const v = new THREE.Vector3(x, BOARD_SURFACE_Y, z).project(camera);
+        return [Number(v.x.toFixed(3)), Number(v.y.toFixed(3))];
+      });
+    }
+
+    function boardCornerState() {
+      const boardCornerNdc = projectBoardCorners();
+      return {
+        boardCornerNdc,
+        boardCornersInView: boardCornerNdc.every(([x, y]) => Math.abs(x) <= 0.96 && Math.abs(y) <= 0.92)
+      };
+    }
 
     function setCameraPose(posArr, targetArr) {
       activeCamTransition = null;
@@ -9418,6 +9828,16 @@ export function initWizardChess() {
         }
         setActiveCamButton('btn-cam-player');
         setCameraForSide(playerCamSide, false);
+      } else if (preset === 'spectator') {
+        const wasSpectatorActive = document.getElementById('btn-cam-spectator')?.classList.contains('active');
+        if (wasSpectatorActive) {
+          spectatorCamSide = spectatorCamSide === 'w' ? 'b' : 'w';
+        } else {
+          spectatorCamSide = playerColor === 'b' ? 'b' : 'w';
+        }
+        setActiveCamButton('btn-cam-spectator');
+        const pose = getSpectatorPose(spectatorCamSide, tPortrait);
+        smoothCameraTo(pose.pos, pose.lookAt, 0.75);
       } else if (preset === 'top') {
         const wasTopActive = document.getElementById('btn-cam-top')?.classList.contains('active');
         if (wasTopActive) {
@@ -9532,9 +9952,10 @@ export function initWizardChess() {
     document.getElementById('btn-quick-cam')?.addEventListener('click', () => {
       const isTopActive = document.getElementById('btn-cam-top')?.classList.contains('active');
       if (isTopActive) {
-        playerCamSide = gameMode === 'multi' ? playerColor : isPassAndPlay ? currentTurn : playerColor;
-        setActiveCamButton('btn-cam-player');
-        setCameraForSide(playerCamSide, false);
+        spectatorCamSide = gameMode === 'multi' ? playerColor : isPassAndPlay ? currentTurn : playerColor;
+        setActiveCamButton('btn-cam-spectator');
+        const pose = getSpectatorPose(spectatorCamSide, syncResponsiveCameraFov());
+        smoothCameraTo(pose.pos, pose.lookAt, 0.75);
       } else {
         overheadCamSide = gameMode === 'multi' ? playerColor : isPassAndPlay ? currentTurn : playerColor;
         setActiveCamButton('btn-cam-top');
@@ -9561,6 +9982,7 @@ export function initWizardChess() {
     });
     window.wizardSetPieceSkin = applyPieceTheme;
     window.wizardCyclePieceSkin = cyclePieceTheme;
+    document.getElementById('btn-cam-spectator')?.addEventListener('click', () => setCameraPreset('spectator'));
     document.getElementById('btn-cam-player')?.addEventListener('click', () => setCameraPreset('player'));
     document.getElementById('btn-cam-top')?.addEventListener('click', () => setCameraPreset('top'));
     document.getElementById('btn-cam-side')?.addEventListener('click', () => setCameraPreset('side'));
@@ -9651,6 +10073,30 @@ export function initWizardChess() {
     document.getElementById('btn-audio-toggle')?.addEventListener('click', () => {
       wizardAudio.toggleMuted();
       updateTurnUI();
+    });
+
+    const MOTION_ORDER = ['full', 'quick', 'off'];
+    const MOTION_NAMES = { full: 'Đầy Đủ', quick: 'Nhanh', off: 'Tắt' };
+    const QUALITY_ORDER = ['auto', 'ultra', 'high', 'base'];
+    const QUALITY_NAMES = { ultra: 'Ultra', high: 'High', base: 'Base' };
+    function updateVisualSettingsUI() {
+      const motionLabel = document.getElementById('motion-level-label');
+      if (motionLabel) motionLabel.textContent = `🎬 Hoạt Cảnh: ${MOTION_NAMES[motionLevel]}`;
+      const qualityLabel = document.getElementById('quality-tier-label');
+      if (qualityLabel) {
+        qualityLabel.textContent =
+          qualityPreference === 'auto'
+            ? `✨ Chất Lượng: Tự Động (${QUALITY_NAMES[qualityTier]})`
+            : `✨ Chất Lượng: ${QUALITY_NAMES[qualityTier]}`;
+      }
+    }
+    window.addEventListener('wizardchess:visual-settings', updateVisualSettingsUI);
+    updateVisualSettingsUI();
+    document.getElementById('btn-motion-level')?.addEventListener('click', () => {
+      setMotionLevel(MOTION_ORDER[(MOTION_ORDER.indexOf(motionLevel) + 1) % MOTION_ORDER.length]);
+    });
+    document.getElementById('btn-quality-tier')?.addEventListener('click', () => {
+      setQualityTier(QUALITY_ORDER[(QUALITY_ORDER.indexOf(qualityPreference) + 1) % QUALITY_ORDER.length]);
     });
 
     document.querySelectorAll('[data-promotion-piece]').forEach((btn) => {
@@ -9755,6 +10201,7 @@ export function initWizardChess() {
     }
 
     function setGameVariant(nextVariant) {
+      endKillCam(true);
       const normalized = nextVariant === 'xiangqi' ? 'xiangqi' : 'chess';
       if (typeof document !== 'undefined' && document.body) {
         document.body.dataset.gameVariant = normalized;
@@ -9778,7 +10225,7 @@ export function initWizardChess() {
       syncGameSelectorUI();
       closeGameSelectorModal();
       renderer.shadowMap.needsUpdate = true;
-      renderer.render(scene, camera);
+      renderFrame();
       return gameVariant;
     }
 
@@ -9962,9 +10409,10 @@ export function initWizardChess() {
       const centerPos = new THREE.Vector3(0, BOARD_SURFACE_Y + 0.14, 0);
       spawnStoneShatter(centerPos, 'w', 'queen');
       spawnSignatureCombatVFX('queen', 'finisher', centerPos, centerPos, 0, -1, 'w');
-      wizardAudio.playStoneShatter();
-      wizardAudio.playSignatureAttack('queen', 'finisher');
-      renderer.render(scene, camera);
+      const centerAt = { x: 0, y: BOARD_SURFACE_Y, z: 0 };
+      wizardAudio.playStoneShatter(centerAt);
+      wizardAudio.playSignatureAttack('queen', 'finisher', centerAt);
+      renderFrame();
     }
 
     function syncSkinBoutiqueUI() {
@@ -10025,7 +10473,7 @@ export function initWizardChess() {
         applyPieceTheme(skinId, targetSide);
       }
       syncSkinBoutiqueUI();
-      renderer.render(scene, camera);
+      renderFrame();
     }
 
     function openSkinShopModal() {
@@ -10128,6 +10576,8 @@ export function initWizardChess() {
       getXiangqiBlockedPointsForPiece: (r, c) =>
         getXiangqiBlockedPointsForPiece(extractPureXiangqiBoard(boardState), r, c),
       getAllLegalMoves: (color) => getAllLegalMoves(color || currentTurn),
+      setMotionLevel,
+      setQualityTier,
       setCombatCameraZoomEnabled: (enabled) => {
         combatCameraZoomEnabled = Boolean(enabled);
         return combatCameraZoomEnabled;
@@ -10136,6 +10586,18 @@ export function initWizardChess() {
       setPieceLabelMode,
       cyclePieceLabelMode,
       getPieceLabelMode: () => pieceLabelMode,
+      getPieceScreenPoint: (r, c) => {
+        const p = boardState[r]?.[c];
+        if (!p || !p.mesh) return null;
+        const rect = renderer.domElement.getBoundingClientRect();
+        const roleScale = ROLE_SCALE_MULTIPLIERS[p.type] || 1.0;
+        const midY = p.mesh.position.y + (PIECE_HEIGHTS[p.type] || 0.38) * roleScale * 0.5;
+        const v = new THREE.Vector3(p.mesh.position.x, midY, p.mesh.position.z).project(camera);
+        return {
+          x: rect.left + (v.x + 1) * 0.5 * rect.width,
+          y: rect.top + (-v.y + 1) * 0.5 * rect.height
+        };
+      },
       inspectSquare: (r, c) => {
         if (
           typeof r !== 'number' ||
@@ -10288,7 +10750,7 @@ export function initWizardChess() {
           enforceCathedralBoundsAndSolidColumns(prev, camera.position, orbitControls.target);
           path.push(camera.position.toArray().map((v) => Number(v.toFixed(3))));
         }
-        renderer.render(scene, camera);
+        renderFrame();
         return path;
       },
       setSinglePlayerSide: (color) => {
@@ -10332,7 +10794,7 @@ export function initWizardChess() {
             : computePositionHash(extractPureBoard(boardState), currentTurn, enPassantTarget)
         ];
         updateTurnUI();
-        renderer.render(scene, camera);
+        renderFrame();
       },
       triggerDemoCapture: () => {
         // Set up an immediate pawn capture (e4 x d5) and execute it
@@ -10379,6 +10841,17 @@ export function initWizardChess() {
           programs: renderer.info?.programs ? renderer.info.programs.length : 0
         },
         audioState: wizardAudio.getState(),
+        postFx: {
+          active: Boolean(postComposer),
+          gtao: Boolean(postPasses.gtao),
+          bloom: Boolean(postPasses.bloom),
+          dof: Boolean(postPasses.bokeh?.enabled)
+        },
+        motionLevel,
+        qualityTier,
+        qualityTierSource,
+        qualityPreference,
+        gpuRenderer: gpuRendererString,
         scriptedGameActive,
         scriptDeviated,
         scriptMovesCount: scriptMoves.length,
@@ -10397,10 +10870,13 @@ export function initWizardChess() {
         isAnimatingMove,
         gameOver,
         checkmateState: { ...checkmateState },
+        cinematicActive,
+        killCamDof: Boolean(postPasses.bokeh?.enabled),
         capturedByWhite,
         capturedByBlack,
         cameraPos: camera.position.toArray(),
         cameraTarget: orbitControls.target.toArray(),
+        ...boardCornerState(),
         cameraFov: camera.fov,
         portraitFramingFactor: Number(getPortraitFramingFactor().toFixed(3)),
         playerCamSide,
@@ -10430,6 +10906,7 @@ export function initWizardChess() {
         pieceLabelMode,
         inspectedSquare,
         visibleOverheadBadgeCount: overheadBadgeSlots.filter((s) => s.visible).length,
+        hoveredSquare: hoveredSquare ? { ...hoveredSquare } : null,
         inspectCardVisible: Boolean(
           document.getElementById('piece-inspect-card')?.classList.contains('visible')
         ),
@@ -10445,7 +10922,7 @@ export function initWizardChess() {
         telemetry: cameraTelemetry
       }),
       captureScreenshot: async (filename) => {
-        renderer.render(scene, camera);
+        renderFrame();
         const outCanvas = document.createElement('canvas');
         outCanvas.width = renderer.domElement.width;
         outCanvas.height = renderer.domElement.height;
@@ -10581,7 +11058,7 @@ export function initWizardChess() {
       for (let i = 0; i < steps; i++) {
         stepScene(subDt, false);
       }
-      renderer.render(scene, camera);
+      renderFrame();
       updatePieceOverheadOverlay();
     };
 
@@ -10597,9 +11074,16 @@ export function initWizardChess() {
     const _camForward = new THREE.Vector3();
     const _camRight = new THREE.Vector3();
     const _camHorizDir = new THREE.Vector3();
+    const _audioForward = new THREE.Vector3();
     function stepScene(dt, doRender = true) {
       elapsedTotal += dt;
+      if (cinematicActive) {
+        cinematicTimer += dt;
+        if (cinematicTimer >= KILL_CAM_HOLD_S) endKillCam(false);
+      }
       const prevCamPos = _prevCamPos.copy(camera.position);
+      // The listener trails the camera by one frame, which is inaudible; it is a no-op until audio runs.
+      wizardAudio.setListener(camera.position, camera.getWorldDirection(_audioForward), camera.up);
 
       if (isAnimatingMove && activeCombatMixers.size > 0) {
         idleMixerAccum += dt;
@@ -10929,7 +11413,8 @@ export function initWizardChess() {
       }
 
       if (doRender && !isWebGLContextLost) {
-        renderer.render(scene, camera);
+        processPendingHover();
+        renderFrame(dt);
         updatePieceOverheadOverlay();
       }
     }
@@ -10954,6 +11439,8 @@ export function initWizardChess() {
       const isMobileNow = Boolean(
         window.innerWidth <= 768 || coarsePointerQuery?.matches
       );
+      trackSlowFramesForTier(frameMs, currentActiveDpr <= (isMobileNow ? 1.35 : 1.0));
+      if (dprFrozen) return currentActiveDpr;
       if (isMobileNow) {
         const targetMobileRetinaDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 2.0);
         if (rollingFrameMs > 28.0) {
@@ -10967,8 +11454,7 @@ export function initWizardChess() {
             currentActiveDpr = 1.35;
             highFrameTimeStreak = 0;
             lastDprAdjustTime = elapsedTotal;
-            renderer.setPixelRatio(currentActiveDpr);
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            applyRendererSize();
           }
         } else {
           highFrameTimeStreak = 0;
@@ -10978,8 +11464,7 @@ export function initWizardChess() {
               currentActiveDpr = targetMobileRetinaDpr;
               lowFrameTimeStreak = 0;
               lastDprAdjustTime = elapsedTotal;
-              renderer.setPixelRatio(currentActiveDpr);
-              renderer.setSize(window.innerWidth, window.innerHeight);
+              applyRendererSize();
             }
           } else {
             lowFrameTimeStreak = 0;
@@ -10998,8 +11483,7 @@ export function initWizardChess() {
           currentActiveDpr = 1.0;
           highFrameTimeStreak = 0;
           lastDprAdjustTime = elapsedTotal;
-          renderer.setPixelRatio(currentActiveDpr);
-          renderer.setSize(window.innerWidth, window.innerHeight);
+          applyRendererSize();
         }
       } else {
         highFrameTimeStreak = 0;
@@ -11009,8 +11493,7 @@ export function initWizardChess() {
             currentActiveDpr = maxTargetDpr;
             lowFrameTimeStreak = 0;
             lastDprAdjustTime = elapsedTotal;
-            renderer.setPixelRatio(currentActiveDpr);
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            applyRendererSize();
           }
         } else {
           lowFrameTimeStreak = 0;
@@ -11020,11 +11503,70 @@ export function initWizardChess() {
     }
     window.wizardChess.feedFrameTimeSample = feedFrameTimeSample;
 
+    // Once DPR can drop no further, two seconds of slow frames lower the tier for this session only.
+    function trackSlowFramesForTier(frameMs, dprAtFloor) {
+      if (isAutomatedTest && !window.__WIZARD_ALLOW_TIER_DOWNGRADE__) return;
+      // Shader compiles and asset loads stall the first seconds; a fresh tier also needs time to settle.
+      const settling = elapsedTotal < 4 || elapsedTotal - lastTierAdjustTime < 3;
+      if (qualityTier === 'base' || settling || rollingFrameMs <= 20.0 || !dprAtFloor) {
+        slowFrameSeconds = 0;
+        return;
+      }
+      // Cap each sample so one long hitch cannot count as two seconds of slow play.
+      slowFrameSeconds += Math.min(frameMs, 50) / 1000;
+      if (slowFrameSeconds < 2) return;
+      slowFrameSeconds = 0;
+      lastTierAdjustTime = elapsedTotal;
+      rollingFrameMs = 16.67;
+      qualityTier = downgradeTier(qualityTier);
+      qualityTierSource = 'downgraded';
+      announceVisualSettings();
+    }
+
+    // Test-only frame recorder: real deltas between frames into a fixed buffer, no per-frame allocation.
+    const frameRecorder = new Float32Array(4096);
+    let frameRecorderCount = -1;
+    let frameRecorderLast = 0;
+    let dprFrozen = false;
+    window.wizardChess.startFrameRecorder = () => {
+      frameRecorderCount = 0;
+      frameRecorderLast = performance.now();
+    };
+    window.wizardChess.stopFrameRecorder = () => {
+      const count = Math.max(0, frameRecorderCount);
+      frameRecorderCount = -1;
+      const sorted = Array.from(frameRecorder.subarray(0, count)).sort((a, b) => a - b);
+      const at = (q) => (count ? Number(sorted[Math.min(count - 1, Math.floor(count * q))].toFixed(2)) : 0);
+      const mean = count ? sorted.reduce((n, v) => n + v, 0) / count : 0;
+      return {
+        count,
+        mean: Number(mean.toFixed(2)),
+        p50: at(0.5),
+        p95: at(0.95),
+        max: count ? Number(sorted[count - 1].toFixed(2)) : 0,
+        over33: sorted.filter((v) => v > 33).length
+      };
+    };
+    /** Holds the adaptive DPR still (optionally at a given value) so perf runs measure a fixed pixel count. */
+    window.wizardChess.freezeDpr = (on, dpr) => {
+      dprFrozen = Boolean(on);
+      if (dprFrozen && Number.isFinite(dpr)) {
+        currentActiveDpr = dpr;
+        applyRendererSize();
+      }
+      return currentActiveDpr;
+    };
+
     function animate() {
       rafPending = false;
       if (manualStepMode) return;
       rafPending = true;
       requestAnimationFrame(animate);
+      if (frameRecorderCount >= 0 && frameRecorderCount < frameRecorder.length) {
+        const now = performance.now();
+        frameRecorder[frameRecorderCount++] = now - frameRecorderLast;
+        frameRecorderLast = now;
+      }
       const rawDelta = clock.getDelta();
       if (rawDelta > 0.001 && rawDelta < 1.0) {
         feedFrameTimeSample(rawDelta * 1000);
@@ -11039,15 +11581,22 @@ export function initWizardChess() {
       );
       if (isMobileNow) {
         currentActiveDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.75), 2.0);
-        renderer.setPixelRatio(currentActiveDpr);
       }
       camera.aspect = window.innerWidth / window.innerHeight;
       syncResponsiveCameraFov();
       camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      applyRendererSize();
+      // The saved kill-cam pose no longer frames the new viewport, so a resize ends it.
+      endKillCam(true);
       if (!isAnimatingMove) {
         if (document.getElementById('btn-cam-player')?.classList.contains('active')) {
           setCameraForSide(playerCamSide, true);
+        } else if (document.getElementById('btn-cam-spectator')?.classList.contains('active')) {
+          const pose = getSpectatorPose(spectatorCamSide, getPortraitFramingFactor());
+          activeCamTransition = null;
+          camera.position.copy(pose.pos);
+          orbitControls.target.copy(pose.lookAt);
+          flushOrbitControlsDamping();
         } else if (document.getElementById('btn-cam-top')?.classList.contains('active')) {
           const tPortrait = getPortraitFramingFactor();
           const zSign = overheadCamSide === 'b' ? -1 : 1;
@@ -11057,7 +11606,7 @@ export function initWizardChess() {
         }
       }
       if (!isWebGLContextLost) {
-        renderer.render(scene, camera);
+        renderFrame();
         updatePieceOverheadOverlay();
       }
     }
@@ -11124,7 +11673,7 @@ export function initWizardChess() {
           }
         }
         renderer.shadowMap.needsUpdate = true;
-        renderer.render(scene, camera);
+        renderFrame();
         clock.getDelta();
         if (!manualStepMode) {
           animate();

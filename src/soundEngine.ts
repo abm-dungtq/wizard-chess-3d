@@ -3,10 +3,22 @@ export interface AudioStateSnapshot {
   supported: boolean;
   playCount: number;
   lastCue: string | null;
+  contextState: string;
 }
+
+export interface AudioPoint {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** Positioned cues end within ~0.7 s; their panner is released after this, with margin. */
+const PANNER_RELEASE_MS = 1500;
 
 export class WizardAudioEngine {
   private ctx: AudioContext | null = null;
+  private master: GainNode | null = null;
+  private lastListener = new Float64Array(9).fill(NaN);
   private slideNoiseBuf: AudioBuffer | null = null;
   private shatterNoiseBuf: AudioBuffer | null = null;
   private muted = false;
@@ -21,19 +33,108 @@ export class WizardAudioEngine {
     if (!this.ctx) {
       try {
         this.ctx = new AudioCtx();
+        this.master = this.ctx.createGain();
+        this.master.connect(this.ctx.destination);
       } catch {
         return null;
       }
     }
-    if (this.ctx.state === 'suspended') {
+    // Safari also reports 'interrupted' after a call or app switch; resume from any non-running state.
+    if (this.ctx.state !== 'running') {
       this.ctx.resume().catch(() => {});
     }
     return this.ctx;
   }
 
+  /** Call from a user gesture: starts the context and builds the noise buffers before the first move needs them. */
   public unlock(): boolean {
     const ctx = this.ensureContext();
-    return Boolean(ctx);
+    if (!ctx) return false;
+    if (ctx.state === 'running') return true;
+    try {
+      // iOS Safari only unlocks audio once a source starts inside the gesture.
+      const silent = ctx.createBufferSource();
+      silent.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      silent.connect(ctx.destination);
+      silent.start();
+    } catch {}
+    this.getSlideNoiseBuffer(ctx);
+    this.getShatterNoiseBuffer(ctx);
+    try {
+      // The first HRTF panner loads the HRTF data; doing it here keeps the first positioned hit from playing dry.
+      ctx.createPanner().panningModel = 'HRTF';
+    } catch {}
+    ctx.resume().catch(() => {});
+    return true;
+  }
+
+  private output(ctx: AudioContext): AudioNode {
+    return this.master || ctx.destination;
+  }
+
+  /** Routes a cue through an HRTF panner at `at`; without a position it plays unpositioned. */
+  private spatialOut(ctx: AudioContext, at?: AudioPoint): AudioNode {
+    if (!at) return this.output(ctx);
+    try {
+      const panner = ctx.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 2;
+      panner.rolloffFactor = 0.6;
+      if (panner.positionX) {
+        panner.positionX.value = at.x;
+        panner.positionY.value = at.y;
+        panner.positionZ.value = at.z;
+      } else {
+        panner.setPosition(at.x, at.y, at.z);
+      }
+      panner.connect(this.output(ctx));
+      setTimeout(() => {
+        try {
+          panner.disconnect();
+        } catch {}
+      }, PANNER_RELEASE_MS);
+      return panner;
+    } catch {
+      return this.output(ctx);
+    }
+  }
+
+  /** Stores one point of the listener pose; returns 1 when it moved. */
+  private storeListenerPoint(offset: number, p: AudioPoint): number {
+    const last = this.lastListener;
+    const moved =
+      !(Math.abs(p.x - last[offset]) < 1e-4) ||
+      !(Math.abs(p.y - last[offset + 1]) < 1e-4) ||
+      !(Math.abs(p.z - last[offset + 2]) < 1e-4);
+    last[offset] = p.x;
+    last[offset + 1] = p.y;
+    last[offset + 2] = p.z;
+    return moved ? 1 : 0;
+  }
+
+  /** Keeps the listener on the camera so positioned cues come from the right side of the board. */
+  public setListener(pos: AudioPoint, forward: AudioPoint, up: AudioPoint): void {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running') return;
+    // A still camera writes nothing, so the listener's AudioParam timeline stays empty.
+    const moved = this.storeListenerPoint(0, pos) | this.storeListenerPoint(3, forward) | this.storeListenerPoint(6, up);
+    if (!moved) return;
+    const l = ctx.listener;
+    if (l.positionX) {
+      l.positionX.value = pos.x;
+      l.positionY.value = pos.y;
+      l.positionZ.value = pos.z;
+      l.forwardX.value = forward.x;
+      l.forwardY.value = forward.y;
+      l.forwardZ.value = forward.z;
+      l.upX.value = up.x;
+      l.upY.value = up.y;
+      l.upZ.value = up.z;
+    } else {
+      l.setPosition(pos.x, pos.y, pos.z);
+      l.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
+    }
   }
 
   private getSlideNoiseBuffer(ctx: AudioContext): AudioBuffer {
@@ -86,7 +187,8 @@ export class WizardAudioEngine {
       muted: this.muted,
       supported,
       playCount: this.playCount,
-      lastCue: this.lastCue
+      lastCue: this.lastCue,
+      contextState: this.ctx ? this.ctx.state : 'none'
     };
   }
 
@@ -131,7 +233,7 @@ export class WizardAudioEngine {
     oscGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
 
     osc.connect(oscGain);
-    oscGain.connect(ctx.destination);
+    oscGain.connect(this.output(ctx));
     this.bindAutoDisconnect(osc, oscGain);
     osc.start(now);
     osc.stop(now + dur);
@@ -152,17 +254,18 @@ export class WizardAudioEngine {
 
     noise.connect(filter);
     filter.connect(nGain);
-    nGain.connect(ctx.destination);
+    nGain.connect(this.output(ctx));
     this.bindAutoDisconnect(noise, filter, nGain);
     noise.start(now);
     noise.stop(now + dur);
   }
 
   // Metallic sword/axe cleaving into defending stone armor
-  public playWeaponClash(): void {
+  public playWeaponClash(at?: AudioPoint): void {
     this.recordCue('clash');
     const ctx = this.ensureContext();
     if (!ctx) return;
+    const dest = this.spatialOut(ctx, at);
 
     const now = ctx.currentTime;
     const freqs = [420, 685, 1140, 1790];
@@ -177,7 +280,7 @@ export class WizardAudioEngine {
       gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.24);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(dest);
       this.bindAutoDisconnect(osc, gain);
       osc.start(now);
       osc.stop(now + 0.25);
@@ -185,10 +288,11 @@ export class WizardAudioEngine {
   }
 
   // Explosive 32-shard stone shatter burst + low cathedral impact boom
-  public playStoneShatter(): void {
+  public playStoneShatter(at?: AudioPoint): void {
     this.recordCue('shatter');
     const ctx = this.ensureContext();
     if (!ctx) return;
+    const dest = this.spatialOut(ctx, at);
 
     const now = ctx.currentTime;
 
@@ -203,7 +307,7 @@ export class WizardAudioEngine {
     subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
 
     sub.connect(subGain);
-    subGain.connect(ctx.destination);
+    subGain.connect(dest);
     this.bindAutoDisconnect(sub, subGain);
     sub.start(now);
     sub.stop(now + 0.52);
@@ -224,7 +328,7 @@ export class WizardAudioEngine {
 
     noise.connect(filter);
     filter.connect(nGain);
-    nGain.connect(ctx.destination);
+    nGain.connect(dest);
     this.bindAutoDisconnect(noise, filter, nGain);
     noise.start(now);
     noise.stop(now + dur);
@@ -250,7 +354,7 @@ export class WizardAudioEngine {
       gain.gain.exponentialRampToValueAtTime(0.001, start + 0.55);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.output(ctx));
       this.bindAutoDisconnect(osc, gain);
       osc.start(start);
       osc.stop(start + 0.58);
@@ -276,7 +380,7 @@ export class WizardAudioEngine {
       gain.gain.exponentialRampToValueAtTime(0.0008, now + 1.45);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.output(ctx));
       this.bindAutoDisconnect(osc, gain);
       osc.start(now);
       osc.stop(now + 1.5);
@@ -300,7 +404,7 @@ export class WizardAudioEngine {
       gain.gain.linearRampToValueAtTime(0.11, t0 + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.42);
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.output(ctx));
       this.bindAutoDisconnect(osc, gain);
       osc.start(t0);
       osc.stop(t0 + 0.45);
@@ -310,12 +414,14 @@ export class WizardAudioEngine {
   // Piece-specific signature combat audio synthesis for each of the 6 characters
   public playSignatureAttack(
     pieceType: string,
-    stage: 'windup' | 'contact1' | 'contact2' | 'finisher' = 'finisher'
+    stage: 'windup' | 'contact1' | 'contact2' | 'finisher' = 'finisher',
+    at?: AudioPoint
   ): void {
     const pType = (pieceType || 'queen').toLowerCase();
     this.recordCue(`sig_${pType}_${stage}`);
     const ctx = this.ensureContext();
     if (!ctx) return;
+    const dest = this.spatialOut(ctx, at);
 
     const now = ctx.currentTime;
 
@@ -330,7 +436,7 @@ export class WizardAudioEngine {
         thudGain.gain.setValueAtTime(0.24, now);
         thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
         thud.connect(thudGain);
-        thudGain.connect(ctx.destination);
+        thudGain.connect(dest);
         this.bindAutoDisconnect(thud, thudGain);
         thud.start(now);
         thud.stop(now + 0.25);
@@ -343,7 +449,7 @@ export class WizardAudioEngine {
         brassGain.gain.setValueAtTime(0.08, now);
         brassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
         brass.connect(brassGain);
-        brassGain.connect(ctx.destination);
+        brassGain.connect(dest);
         this.bindAutoDisconnect(brass, brassGain);
         brass.start(now);
         brass.stop(now + 0.20);
@@ -359,7 +465,7 @@ export class WizardAudioEngine {
           gain.gain.setValueAtTime(0.075, now);
           gain.gain.exponentialRampToValueAtTime(0.001, now + 0.23);
           osc.connect(gain);
-          gain.connect(ctx.destination);
+          gain.connect(dest);
           this.bindAutoDisconnect(osc, gain);
           osc.start(now);
           osc.stop(now + 0.24);
@@ -378,7 +484,7 @@ export class WizardAudioEngine {
       quakeGain.gain.setValueAtTime(0.32, now);
       quakeGain.gain.exponentialRampToValueAtTime(0.001, now + 0.60);
       quake.connect(quakeGain);
-      quakeGain.connect(ctx.destination);
+      quakeGain.connect(dest);
       this.bindAutoDisconnect(quake, quakeGain);
       quake.start(now);
       quake.stop(now + 0.62);
@@ -393,7 +499,7 @@ export class WizardAudioEngine {
         gain.gain.setValueAtTime(0.07, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(dest);
         this.bindAutoDisconnect(osc, gain);
         osc.start(now);
         osc.stop(now + 0.36);
@@ -413,7 +519,7 @@ export class WizardAudioEngine {
         hornGain.gain.linearRampToValueAtTime(0.09, now + 0.12);
         hornGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
         horn.connect(hornGain);
-        hornGain.connect(ctx.destination);
+        hornGain.connect(dest);
         this.bindAutoDisconnect(horn, hornGain);
         horn.start(now);
         horn.stop(now + 0.36);
@@ -427,7 +533,7 @@ export class WizardAudioEngine {
         sonicGain.gain.setValueAtTime(0.25, now);
         sonicGain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
         sonic.connect(sonicGain);
-        sonicGain.connect(ctx.destination);
+        sonicGain.connect(dest);
         this.bindAutoDisconnect(sonic, sonicGain);
         sonic.start(now);
         sonic.stop(now + 0.38);
@@ -450,7 +556,7 @@ export class WizardAudioEngine {
           gain.gain.linearRampToValueAtTime(0.085, t0 + 0.05);
           gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.42);
           osc.connect(gain);
-          gain.connect(ctx.destination);
+          gain.connect(dest);
           this.bindAutoDisconnect(osc, gain);
           osc.start(t0);
           osc.stop(t0 + 0.44);
@@ -465,7 +571,7 @@ export class WizardAudioEngine {
         beamGain.gain.setValueAtTime(0.18, now);
         beamGain.gain.exponentialRampToValueAtTime(0.001, now + 0.46);
         beam.connect(beamGain);
-        beamGain.connect(ctx.destination);
+        beamGain.connect(dest);
         this.bindAutoDisconnect(beam, beamGain);
         beam.start(now);
         beam.stop(now + 0.48);
@@ -486,7 +592,7 @@ export class WizardAudioEngine {
           gain.gain.setValueAtTime(0.065, now);
           gain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
           osc.connect(gain);
-          gain.connect(ctx.destination);
+          gain.connect(dest);
           this.bindAutoDisconnect(osc, gain);
           osc.start(now);
           osc.stop(now + 0.20);
@@ -503,7 +609,7 @@ export class WizardAudioEngine {
           gain.gain.setValueAtTime(0.08, now);
           gain.gain.exponentialRampToValueAtTime(0.001, now + 0.46);
           osc.connect(gain);
-          gain.connect(ctx.destination);
+          gain.connect(dest);
           this.bindAutoDisconnect(osc, gain);
           osc.start(now);
           osc.stop(now + 0.48);
@@ -524,7 +630,7 @@ export class WizardAudioEngine {
         launchGain.gain.setValueAtTime(0.24, now);
         launchGain.gain.exponentialRampToValueAtTime(0.001, now + 0.44);
         launch.connect(launchGain);
-        launchGain.connect(ctx.destination);
+        launchGain.connect(dest);
         this.bindAutoDisconnect(launch, launchGain);
         launch.start(now);
         launch.stop(now + 0.45);
@@ -538,7 +644,7 @@ export class WizardAudioEngine {
         boomGain.gain.setValueAtTime(0.34, now);
         boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.58);
         boom.connect(boomGain);
-        boomGain.connect(ctx.destination);
+        boomGain.connect(dest);
         this.bindAutoDisconnect(boom, boomGain);
         boom.start(now);
         boom.stop(now + 0.60);
@@ -556,7 +662,7 @@ export class WizardAudioEngine {
       stompGain.gain.setValueAtTime(0.28, now);
       stompGain.gain.exponentialRampToValueAtTime(0.001, now + 0.50);
       stomp.connect(stompGain);
-      stompGain.connect(ctx.destination);
+      stompGain.connect(dest);
       this.bindAutoDisconnect(stomp, stompGain);
       stomp.start(now);
       stomp.stop(now + 0.52);
@@ -575,7 +681,7 @@ export class WizardAudioEngine {
         gain.gain.setValueAtTime(0.07, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.21);
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(dest);
         this.bindAutoDisconnect(osc, gain);
         osc.start(now);
         osc.stop(now + 0.22);
@@ -596,7 +702,7 @@ export class WizardAudioEngine {
         gain.gain.setValueAtTime(freq > 1000 ? 0.11 : 0.09, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.34);
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(dest);
         this.bindAutoDisconnect(osc, gain);
         osc.start(now);
         osc.stop(now + 0.35);
@@ -611,7 +717,7 @@ export class WizardAudioEngine {
       boomGain.gain.setValueAtTime(0.34, now);
       boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.64);
       boom.connect(boomGain);
-      boomGain.connect(ctx.destination);
+      boomGain.connect(dest);
       this.bindAutoDisconnect(boom, boomGain);
       boom.start(now);
       boom.stop(now + 0.66);

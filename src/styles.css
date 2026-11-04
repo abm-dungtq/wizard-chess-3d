@@ -8,6 +8,25 @@
   --muted: #9aa0a6;
   --accent-blue: #4ea8de;
   --danger: #e63946;
+  --glass-fill: rgba(16, 20, 30, 0.46);
+  --glass-stroke: rgba(255, 255, 255, 0.14);
+  --glass-blur: blur(22px) saturate(165%);
+  --glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(0, 0, 0, 0.28);
+  --glass-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+}
+
+@supports (color: color(display-p3 1 1 1)) {
+  :root {
+    --gold: color(display-p3 0.86 0.69 0.24);
+    --gold-bright: color(display-p3 0.99 0.85 0.40);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-fill: rgba(12, 15, 22, 0.97);
+    --glass-blur: none;
+  }
 }
 
 * {
@@ -72,6 +91,7 @@ html, body, #root {
 .brand-pill {
   background: rgba(12, 15, 22, 0.68);
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--hud-border);
   padding: 5px 12px;
   border-radius: 999px;
@@ -92,6 +112,7 @@ html, body, #root {
 .status-pill {
   background: rgba(12, 15, 22, 0.68);
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 5px 12px;
   border-radius: 999px;
@@ -138,6 +159,7 @@ html, body, #root {
 .hud-btn {
   background: rgba(12, 15, 22, 0.68);
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.14);
   color: var(--text);
   padding: 5px 11px;
@@ -195,6 +217,7 @@ html, body, #root {
 .hint-pill {
   background: rgba(10, 12, 18, 0.64);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(212, 175, 55, 0.20);
   padding: 5px 12px;
   border-radius: 999px;
@@ -212,6 +235,7 @@ html, body, #root {
 .captured-pill {
   background: rgba(10, 12, 18, 0.64);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 5px 12px;
   border-radius: 999px;
@@ -247,6 +271,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
   justify-content: center;
   background: rgba(6, 8, 14, 0.72);
   backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   pointer-events: none;
   opacity: 0;
   transform: scale(0.96);
@@ -440,6 +465,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
     inset 0 0 24px rgba(212, 175, 55, 0.12);
   text-align: center;
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .checkmate-banner::before {
@@ -634,6 +660,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
   z-index: 28;
   background: rgba(4, 6, 11, 0.45);
   backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.22s ease;
@@ -652,6 +679,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
   width: min(440px, calc(100vw - 28px));
   background: linear-gradient(180deg, rgba(14, 18, 28, 0.96) 0%, rgba(8, 10, 16, 0.98) 100%);
   backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   border: 1px solid rgba(212, 175, 55, 0.48);
   border-radius: 16px;
   padding: 14px 16px 16px;
@@ -795,8 +823,9 @@ body.cinematic-ui-hidden #piece-inspect-card {
   grid-column: span 2;
 }
 
-/* Full-width Skin Banner inside the consolidated menu */
-#btn-piece-skin {
+/* Full-width rows inside the consolidated menu: the skin banner and the default 3/4 camera */
+#btn-piece-skin,
+#btn-cam-spectator {
   grid-column: span 6;
 }
 
@@ -814,6 +843,8 @@ body.cinematic-ui-hidden #piece-inspect-card {
 #btn-cam-side,
 #btn-cam-wide,
 #btn-audio-toggle,
+#btn-motion-level,
+#btn-quality-tier,
 #btn-hide-ui {
   grid-column: span 3;
 }
@@ -838,6 +869,98 @@ body.cinematic-ui-hidden #piece-inspect-card {
 }
 
 /* Mobile Responsive View Optimization (Portrait + Landscape Mobile) */
+/* Desktop: the top and bottom bars merge into one floating glass dock at the top center. */
+.dock-tray {
+  display: contents;
+}
+
+@media (min-width: 769px) and (min-height: 521px) {
+  /* Centered with flex, not a transform: a transformed #hud-top would trap the fixed menu panel and backdrop inside it. */
+  /* Symmetric 92 px gutters keep the dock centered and clear of the trainer watermark at the top right. */
+  #hud-top {
+    top: 12px;
+    left: 92px;
+    right: 92px;
+    justify-content: center;
+  }
+
+  #hud-left {
+    max-width: min(1180px, calc(100vw - 184px));
+    justify-content: center;
+    background: var(--glass-fill);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-stroke);
+    box-shadow: var(--glass-specular), var(--glass-shadow);
+    border-radius: 18px;
+    padding: 6px 8px;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  /* One glass surface: the pills and buttons inside drop their own blur and fill. */
+  #hud-left .brand-pill,
+  #hud-left .status-pill,
+  #hud-left .captured-pill {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: transparent;
+    box-shadow: none;
+    white-space: nowrap;
+  }
+
+  #hud-left .captured-pill {
+    border-left: 1px solid var(--glass-stroke);
+    border-radius: 0;
+  }
+
+  #hud-left .hud-btn {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+    white-space: nowrap;
+  }
+
+  #hud-left .hud-btn:not(.active):not(.game-variant-btn) {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  #hud-left .hud-btn:not(.active):not(.game-variant-btn):hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .hint-pill.is-collapsed {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+  }
+
+  #hud-right.consolidated-menu-panel {
+    top: calc(64px + env(safe-area-inset-top, 0px));
+    left: 50%;
+    background: var(--glass-fill);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-stroke);
+    box-shadow: var(--glass-specular), var(--glass-shadow);
+    transform: translate(-50%, -8px) scale(0.98);
+  }
+
+  #hud-right.consolidated-menu-panel.mobile-sheet-open {
+    transform: translate(-50%, 0) scale(1);
+  }
+
+}
+
+/* Chromium only (body.svg-backdrop): refraction on top of the blur. No -webkit- twin, so Safari never gets it. */
+@media (min-width: 769px) and (min-height: 521px) and (prefers-reduced-transparency: no-preference) {
+  body.svg-backdrop:not([data-quality-tier="base"]) #hud-left {
+    backdrop-filter: url(#liquid-glass-refract) var(--glass-blur);
+  }
+}
+
 @media (max-width: 768px), (max-height: 520px) and (orientation: landscape) {
   .trainer-logo-watermark {
     top: calc(8px + env(safe-area-inset-top, 0px));
@@ -990,6 +1113,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
     padding: 6px 8px;
     background: rgba(10, 13, 21, 0.84);
     backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     border: 1px solid rgba(212, 175, 55, 0.42);
     border-radius: 16px;
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65);
@@ -1141,6 +1265,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
   z-index: 36;
   background: rgba(5, 7, 13, 0.72);
   backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1231,6 +1356,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .arena-badge.chess-badge {
@@ -1360,6 +1486,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
   z-index: 35;
   background: rgba(5, 7, 13, 0.62);
   backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1609,6 +1736,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
   white-space: nowrap;
   pointer-events: none;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.72);
+  transition: opacity 120ms ease-out;
 }
 
 .piece-overhead-badge.faction-w {

@@ -1,9 +1,14 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { initWizardChess } from './wizardChessEngine.js';
+
+// Desktop shows one glass dock at the top; phones keep the captured tray in the bottom bar.
+const DESKTOP_DOCK_QUERY = '(min-width: 769px) and (min-height: 521px)';
 
 export default function App() {
   const initializedRef = useRef(false);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [desktopDock, setDesktopDock] = useState(() => window.matchMedia(DESKTOP_DOCK_QUERY).matches);
+  const capturedTextRef = useRef('');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackVariant, setFeedbackVariant] = useState<'both' | 'chess' | 'xiangqi'>('both');
   const [feedbackCategory, setFeedbackCategory] = useState('Ý tưởng tính năng mới');
@@ -73,6 +78,25 @@ export default function App() {
     initializedRef.current = true;
     initWizardChess();
   }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia(DESKTOP_DOCK_QUERY);
+    const handleChange = () => {
+      // The engine writes the tray text directly; carry it over when the tray moves to the other bar.
+      capturedTextRef.current = document.getElementById('captured-tray')?.textContent ?? '';
+      setDesktopDock(mq.matches);
+    };
+    mq.addEventListener('change', handleChange);
+    return () => mq.removeEventListener('change', handleChange);
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = document.getElementById('captured-tray');
+    if (el && capturedTextRef.current) el.textContent = capturedTextRef.current;
+    capturedTextRef.current = '';
+  }, [desktopDock]);
+
+  const capturedTray = <div className="captured-pill" id="captured-tray"></div>;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -211,6 +235,12 @@ export default function App() {
           >
             {mobileSheetOpen ? '✕ Đóng' : '⚙️ Menu'}
           </button>
+
+          {desktopDock && (
+            <div className="dock-tray" id="dock-tray">
+              {capturedTray}
+            </div>
+          )}
         </div>
 
         <div
@@ -398,6 +428,13 @@ export default function App() {
             🎨 Skin: Cẩm Thạch
           </button>
           <button
+            className="hud-btn active"
+            id="btn-cam-spectator"
+            title="Góc nhìn 3/4 từ phía người chơi (Bấm lần nữa để lật Trắng / Đen)"
+          >
+            🎥 Góc 3/4
+          </button>
+          <button
             className="hud-btn"
             id="btn-cam-player"
             title="Góc nhìn Người Chơi (Bấm lần nữa để lật Trắng / Đen)"
@@ -405,7 +442,7 @@ export default function App() {
             Góc 3D Chính
           </button>
           <button
-            className="hud-btn active"
+            className="hud-btn"
             id="btn-cam-top"
             title="Góc nhìn Từ Trên Xuống (Bấm lần nữa để lật Trắng / Đen)"
           >
@@ -434,6 +471,24 @@ export default function App() {
           </button>
           <button
             className="hud-btn"
+            id="btn-motion-level"
+            type="button"
+            aria-label="Motion level"
+            title="Hoạt cảnh: Đầy Đủ / Nhanh / Tắt (mặc định theo cài đặt Giảm chuyển động của máy)"
+          >
+            <span id="motion-level-label">🎬 Hoạt Cảnh: Đầy Đủ</span>
+          </button>
+          <button
+            className="hud-btn"
+            id="btn-quality-tier"
+            type="button"
+            aria-label="Quality tier"
+            title="Chất lượng hình ảnh: Tự Động / Ultra / High / Base"
+          >
+            <span id="quality-tier-label">✨ Chất Lượng: Tự Động</span>
+          </button>
+          <button
+            className="hud-btn"
             id="btn-hide-ui"
             title="Ẩn thanh điều khiển (Phím tắt: H)"
             onClick={() => setMobileSheetOpen(false)}
@@ -451,7 +506,7 @@ export default function App() {
         <div className="hint-pill" id="controls-hint">
           <strong>Điều khiển:</strong> Click chọn quân &amp; ô để đi &nbsp;•&nbsp; <strong>🔒 Đang Khóa Cam cố định</strong> (Mở &ldquo;⚙️ Menu&rdquo; để đổi Góc Cam / Ván Mới)
         </div>
-        <div className="captured-pill" id="captured-tray"></div>
+        {!desktopDock && capturedTray}
         <div className="mobile-quick-dock" id="mobile-quick-dock" aria-label="Mobile Quick Actions">
           <button
             type="button"
@@ -465,9 +520,9 @@ export default function App() {
             type="button"
             className="hud-btn mobile-dock-btn active"
             id="btn-quick-cam"
-            title="Chuyển nhanh giữa Góc nhìn Từ Trên Xuống (Overhead) và Góc nhìn 3D (Player Cam)"
+            title="Chuyển nhanh giữa Góc nhìn Từ Trên Xuống và Góc nhìn 3/4"
           >
-            📐 Góc: Top
+            📐 Góc: 3D
           </button>
           <button
             type="button"
@@ -998,6 +1053,13 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
+        <filter id="liquid-glass-refract">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.012" numOctaves={1} seed={7} result="n" />
+          <feDisplacementMap in="SourceGraphic" in2="n" scale={14} xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </svg>
     </>
   );
 }
