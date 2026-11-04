@@ -1,7 +1,7 @@
 ---
 phase: 7
 title: "Liquid Glass HUD dock"
-status: pending
+status: completed
 effort: 4h
 pr: PR B
 ---
@@ -109,7 +109,22 @@ pr: PR B
 
 ## Execution notes
 
-(fill in during execution)
+- Task 7.1: `visuals/hud-before-desktop.png` and `hud-before-phone.png` saved (2 files). The after shots (`hud-after-*`) were re-taken on the final CSS.
+- Task 7.2 parity (measured before 7.5): 30 `backdrop-filter` lines in total, 15 with `-webkit-`, 15 without. Parity holds.
+- Task 7.5 cost gate (headed Chromium, tier `high`, 1470x956, load average 2.9): `rollingFrameMs` with the refraction 11.23 / 11.01 ms, without it 11.26 / 11.16 ms. The difference is under 0.2 ms, so the rule stays. Crops of the dock with and without `body.svg-backdrop` differ, so the refraction really renders.
+- Task 7.6: the new test `'desktop HUD is one glass dock within 12% of the viewport height'` passes. Task 7.7: the same test passes in Playwright WebKit (WebKit installed with `npx playwright install webkit`, run with a temporary config that was not committed). There the filter contains `blur` and not `url(`.
+- Deviations from the plan, all reviewed by kongming:
+  - `#hud-top` is centered with flex and symmetric 92 px gutters, not `translateX(-50%)`. The fixed menu panel and the sheet backdrop are children of `#hud-top`, and a transform would make them position relative to it. The 92 px gutters keep the dock clear of the trainer watermark, and `#hud-left` wraps on narrow desktop windows.
+  - `#captured-tray` sits in `#hud-left > #dock-tray` only while `(min-width: 769px) and (min-height: 521px)` matches. Otherwise it stays in `#hud-bottom`, so the phone layout keeps the tray above the quick dock. A `useLayoutEffect` carries the engine-written text over when the tray moves to the other bar. `.dock-tray` is `display: contents`.
+  - The menu panel's open/close transform is combined with the centering translate.
+  - The pills and buttons inside the dock drop their own blur, so there is one glass surface and no nested blur cost.
+  - The refraction rule has its own `(prefers-reduced-transparency: no-preference)` query, so "Reduce transparency" never depends on an invalid computed value. The SVG filter uses the default filter region, so the dock edges get no fringe.
+  - The test also checks, at 900x700, that nothing spills out of the dock and that the dock stays left of the watermark. This check fails on the first version of the CSS and passes on the fix. It also checks the hint-collapse class, and that the tray moves back to `#hud-bottom` at 390x844.
+- Failure Protocol: the phase exit run failed `'audio unlocks on first gesture before the first move'` (3 out of 3 timeouts). Cause: an optional `max-width: 1100px` rule hid `.brand-pill`, which the test clicks at the default 1024x768 viewport. On kongming's advice the rule was removed and the test was left unchanged.
+- Found during the visual check: `#btn-cam-spectator` (phase 5) had no grid span in the 6-column menu, so it shrank to one column. It now spans the full width. Committed separately.
+- The hint collapses once, at the first committed move, and does not come back after New Game (the plan says "once").
+- Not fixed: when the menu is open, the sheet backdrop covers the dock, so "✕ Đóng" cannot be clicked. Clicking the backdrop still closes the menu. This was already the case before phase 7.
+- Phase exit: lint OK, `npm test` 31 pass, `npx playwright test` 22 passed + 1 pre-existing skip.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.

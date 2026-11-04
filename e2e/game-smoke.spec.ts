@@ -318,4 +318,72 @@ test.describe('single-player smoke', () => {
     await expect.poll(badges).toBeGreaterThanOrEqual(30);
     expect(errors).toEqual([]);
   });
+
+  test('desktop HUD is one glass dock within 12% of the viewport height', async ({ page, browserName }) => {
+    const errors = collectConsoleErrors(page);
+    await page.setViewportSize({ width: 1470, height: 956 });
+    await openGame(page);
+    await waitIdle(page);
+    // Union height of visible HUD boxes in the top half plus the union height in the bottom half.
+    const hudHeight = () =>
+      page.evaluate(() => {
+        const els = [document.getElementById('hud-left'), ...document.querySelectorAll('#hud-bottom > *')];
+        const mid = window.innerHeight / 2;
+        const spans = { top: [Infinity, -Infinity], bottom: [Infinity, -Infinity] };
+        for (const el of els) {
+          if (!el) continue;
+          const cs = getComputedStyle(el);
+          if (cs.display === 'none' || Number(cs.opacity) === 0) continue;
+          const r = el.getBoundingClientRect();
+          if (r.height === 0) continue;
+          const half = r.top + r.height / 2 < mid ? spans.top : spans.bottom;
+          half[0] = Math.min(half[0], r.top);
+          half[1] = Math.max(half[1], r.bottom);
+        }
+        const h = ([a, b]: number[]) => (b > a ? b - a : 0);
+        return h(spans.top) + h(spans.bottom);
+      });
+    // The hint pill shows before the first move and collapses after it.
+    await expect(page.locator('#controls-hint')).toBeVisible();
+    await expect(page.locator('#controls-hint')).not.toHaveClass(/is-collapsed/);
+
+    await page.evaluate(() => (window as any).wizardChess.executeChessMove(6, 4, 4, 4));
+    await waitIdle(page);
+    await expect(page.locator('#controls-hint')).toHaveClass(/is-collapsed/);
+    await expect.poll(hudHeight).toBeLessThanOrEqual(114);
+    await expect(page.locator('#hud-left #captured-tray')).toHaveCount(1);
+
+    const look = await page.evaluate(() => {
+      const cs = getComputedStyle(document.getElementById('hud-left')!) as any;
+      return { tier: document.body.dataset.qualityTier, filter: String(cs.backdropFilter || cs.webkitBackdropFilter) };
+    });
+    expect(look.tier).toBe('high');
+    // Only Chromium gets the SVG refraction; Safari and Firefox keep the plain blur.
+    if (browserName === 'chromium') expect(look.filter).toContain('url(');
+    else expect(look.filter).not.toContain('url(');
+    expect(look.filter).toContain('blur');
+
+    // On a narrow desktop window the dock wraps instead of spilling out or running under the watermark.
+    await page.setViewportSize({ width: 900, height: 700 });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const dock = document.getElementById('hud-left')!.getBoundingClientRect();
+          const mark = document.querySelector('.trainer-logo-watermark')?.getBoundingClientRect();
+          const childRight = Math.max(
+            ...[...document.querySelectorAll('#hud-left *')]
+              .map((el) => el.getBoundingClientRect())
+              .filter((r) => r.width > 0)
+              .map((r) => r.right)
+          );
+          return childRight <= dock.right + 0.5 && (!mark || dock.right <= mark.left);
+        })
+      )
+      .toBe(true);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('#mobile-quick-dock')).toBeVisible();
+    await expect(page.locator('#hud-bottom #captured-tray')).toHaveCount(1);
+    expect(errors).toEqual([]);
+  });
 });

@@ -60,7 +60,7 @@ This plan is written for a downstream executor model. Every phase lists tasks wi
 | 4 | [Tiered post-processing composer](phase-04-tiered-post-processing.md) | PR B | 4h | completed | 1 |
 | 5 | [3/4 default camera, top-down toggle, kill-cam DOF](phase-05-camera-default-killcam-dof.md) | PR B | 4h | completed | 1, 4 |
 | 6 | [Labels on selection and hover](phase-06-labels-selection-hover.md) | PR B | 2h | completed | 5 |
-| 7 | [Liquid Glass HUD dock](phase-07-liquid-glass-hud-dock.md) | PR B | 4h | pending | 1, 5 |
+| 7 | [Liquid Glass HUD dock](phase-07-liquid-glass-hud-dock.md) | PR B | 4h | completed | 1, 5 |
 | 8 | [Budgets and cross-device verification](phase-08-budgets-cross-device-verification.md) | PR B | 2h | pending | 1-7 |
 
 - PR A (phases 1-3) has no visible layout change except the Motion setting row. It can ship on its own.

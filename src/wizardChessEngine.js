@@ -390,7 +390,19 @@ export function initWizardChess() {
     let slowFrameSeconds = 0;
     let lastTierAdjustTime = 0;
 
+    // CSS reads the tier and motion level from <body> (the HUD glass drops its refraction on `base`).
+    function syncVisualDataset() {
+      document.body.dataset.qualityTier = qualityTier;
+      document.body.dataset.motion = motionLevel;
+    }
+    syncVisualDataset();
+    // navigator.userAgentData exists only in Chromium, so Safari and Firefox never get the SVG refraction.
+    const supportsSvgBackdrop =
+      'userAgentData' in navigator && window.CSS?.supports?.('backdrop-filter', 'url(#a)') === true;
+    document.body.classList.toggle('svg-backdrop', supportsSvgBackdrop);
+
     function announceVisualSettings() {
+      syncVisualDataset();
       window.dispatchEvent(
         new CustomEvent('wizardchess:visual-settings', {
           detail: { motionLevel, qualityTier, qualityTierSource, qualityPreference }
@@ -6573,6 +6585,8 @@ export function initWizardChess() {
           ? boardToWorld(matchedLegal.legR, matchedLegal.legC)
           : null;
 
+      // The desktop hint pill fades out after the first move, leaving the top dock as the only HUD bar.
+      document.getElementById('controls-hint')?.classList.add('is-collapsed');
       // Save board state snapshot (including pre-move scriptCursor & scriptDeviated) so Undo / Left Arrow can step backward
       moveHistory.push({
         snapshot: captureBoardSnapshot(),
