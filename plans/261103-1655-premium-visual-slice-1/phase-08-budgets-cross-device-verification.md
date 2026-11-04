@@ -45,7 +45,7 @@ pr: PR B
   3. Repeat steps 1-2 three times (fresh page each time). Print each result as one JSON line, plus the median mean and how many frames were > 33 ms in each run. To count those, `stopFrameRecorder()` also returns `over33` (number of deltas > 33 ms).
   4. Run once more with vsync on (launch without `--disable-gpu-vsync --disable-frame-rate-limit`, on a 60 Hz or faster display) and print the p95 of that run.
   5. Before recording, check `uptime`: the 1-minute load average must be below 5. On a busier machine the run is inconclusive and must be repeated, not judged.
-- **Pass condition:** median of the three uncapped means ≤ 12, every uncapped run has `over33 ≤ 2` (single GC spikes are tolerated), `currentActiveDpr` equals the desktop cap (1.35), and the vsync-on run has p95 ≤ 17 (no dropped 60 Hz frames). The uncapped p95 is not judged: without vsync frames are released in clumps, so it sits near twice the mean (phase 4 notes).
+- **Pass condition:** median of the three uncapped means ≤ 12, every uncapped run has `over33 ≤ 2` (single GC spikes are tolerated), `currentActiveDpr` equals the ultra desktop cap (1.35 as planned; 1.25 after the reduction ladder's second step, see Execution notes), and the vsync-on run has p95 ≤ 17 (no dropped 60 Hz frames). The uncapped p95 is not judged: without vsync frames are released in clumps, so it sits near twice the mean (phase 4 notes).
 - **If it fails:** apply in order and re-measure after each: quarter-resolution bloom, ultra desktop DPR cap 1.35 to 1.25, GTAO samples 8 to 6 (phase 4 notes). Do not swap SMAA for FXAA.
 - **Verify:** `PERF=1 npx playwright test e2e/perf-budget.spec.ts -g "ultra checkmate" --headed 2>&1 | grep -E 'mean|p95'` shows values meeting the pass condition. Record the JSON lines.
 
@@ -126,7 +126,24 @@ pr: PR B
 
 ## Execution notes
 
-(fill in during execution)
+- Task 8.1: `startFrameRecorder`, `stopFrameRecorder` (with `mean` and `over33`) and `freezeDpr` already existed, pulled forward in phase 4. Added `e2e/perf-budget.spec.ts`, which is skipped unless `PERF=1` (the default run reports these tests as skipped). Each test launches its own Chromium, because Playwright does not allow `launchOptions` per describe group. Contexts use `deviceScaleFactor: 2` (the Mac's Retina value). A first attempt without it ran at DPR 1.0 and was thrown away as not matching the plan's conditions. All three runs are printed before any assertion.
+- Task 8.2, first valid run (DPR 1.35, 1-minute load 4.40): means 12.69 / 12.65 / 12.65 ms, median 12.65 > 12 (failed). `over33` was 1 in each run (passed). Vsync-on p95 was 19.7 ms (p50 18.4).
+- Failure Protocol, kongming:
+  - The uncapped miss is real.
+  - The vsync run is not valid for the 17 ms criterion. The window ran on a 100 Hz monitor, where a 12.6 ms frame lands on every second 10 ms vsync. `system_profiler` shows both physical monitors at 2560x1440 @ 100 Hz. The only 60 Hz screen is an AirPlay display (1728x972), so no real 60 Hz panel was available. A Chromium `--window-position` probe read 100 Hz at every position.
+- Diagnostic suggested by kongming: a temporary `preserveDrawingBuffer: false` (that copy happens only under automation). Result: means 13.70 / 13.44, and the second run had `over33` 6, at load 3.31 rising to 3.97. No gain, so it was reverted; the copy is not the gap.
+- Reduction ladder, in the plan's order:
+  1. Quarter-resolution bloom (`resizePostComposer` now calls `bloom.setSize` with half the drawing buffer; UnrealBloomPass halves its input again). Means 13.57 / 12.93 / 12.90, median 12.93 (load 3.00 → 7.12). Still failing; kept as the first rung.
+  2. Ultra desktop DPR cap 1.35 → 1.25. It is tier-aware: `applyDesktopDprCap` caps `ultra` at 1.25 and other tiers at 1.35, and a tier change only lowers the current DPR. Means 11.44 / 11.41 / 12.69, median **11.44 ≤ 12**, `over33` 1 / 1 / 1, DPR 1.25 (load 3.48). **Passed.** Step 3 (GTAO 6 samples) was not needed.
+- The phase 4 note "Do not touch bloom.resolution" still holds. The bloom change goes through `setSize` in `resizePostComposer`, not the constructor's `resolution` argument.
+- Vsync-on p95 ≤ 17 ms: **not judged**. It needs a 60 Hz display (see above), so it is open for the user.
+- Each checkmate run has one stall of 80-115 ms, most likely the first use of the Bokeh/VFX shaders. The gate tolerates it (`over33 ≤ 2`). Follow-up outside phase 8: warm those programs during start-up.
+- Task 8.3 (Pixel 7, CPU throttle 4×, uncapped, load 5.2): `{"count":147,"mean":9.54,"p50":8,"p95":9.8,"max":203.5,"over33":1}`, tier `base`. **p95 9.8 ≤ 16.6, passed.**
+- Task 8.5 ran with a temporary config (not committed) that had two projects: WebKit `iPhone 15` and Chromium `Pixel 7` with the project's GPU flags. It also used a temporary phone check: tier `base`, `postFx.active === false`, quick dock visible, one legal move, zero console errors.
+  - Five tests are deselected because they assert desktop behavior by design: tier `high` (post-processing, motion level), mouse hover labels, the 1470 px glass dock, and the audio test, which clicks the desktop-only `.brand-pill`.
+  - Result: **22 passed, 2 skipped** (the existing canvas-click skip, once per device). That is 11 per device, including the phone check.
+  - An earlier run without the GPU flags fell back to software rendering on Pixel 7 (2 frames instead of 20+ in the tween test) and was discarded.
+- Task 8.6 screenshots at 1470x956: `visuals/after-spectator-ultra.png`, `after-spectator-base.png`, `after-killcam-ultra.png`, plus `hud-after-phone.png` (390x844) and the before/after pairs `hud-before-*`/`hud-after-*` and `base-before.png`/`base-after.png`. Waiting for the user's approval.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.

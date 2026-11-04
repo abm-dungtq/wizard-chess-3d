@@ -240,7 +240,8 @@ export function initWizardChess() {
       powerPreference: 'high-performance',
       preserveDrawingBuffer: isAutomatedTest
     });
-    const maxTargetDpr = Math.min(window.devicePixelRatio || 1, 1.35);
+    const deviceDprCap = Math.min(window.devicePixelRatio || 1, 1.35);
+    let maxTargetDpr = deviceDprCap;
     const coarsePointerQuery = window.matchMedia?.('(pointer: coarse)');
     const isCoarseOrMobile = Boolean(window.innerWidth <= 768 || coarsePointerQuery?.matches);
     const nativeDeviceDpr = window.devicePixelRatio || 1;
@@ -279,11 +280,11 @@ export function initWizardChess() {
       if (!postComposer) return;
       postComposer.setPixelRatio(currentActiveDpr);
       postComposer.setSize(window.innerWidth, window.innerHeight);
-      // The composer resizes every pass to full size, so GTAO is halved afterwards.
-      if (postPasses.gtao) {
-        const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-        postPasses.gtao.setSize(Math.ceil(size.x / 2), Math.ceil(size.y / 2));
-      }
+      // The composer resizes every pass to full size, so GTAO is halved afterwards. Bloom halves its input
+      // internally, so passing half the buffer gives quarter-resolution bloom targets.
+      const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+      if (postPasses.gtao) postPasses.gtao.setSize(Math.ceil(size.x / 2), Math.ceil(size.y / 2));
+      if (postPasses.bloom) postPasses.bloom.setSize(Math.ceil(size.x / 2), Math.ceil(size.y / 2));
     }
     function disposePostComposer() {
       if (!postComposer) return;
@@ -514,10 +515,23 @@ export function initWizardChess() {
     const startPose = getSpectatorPose('w', getPortraitFramingFactor());
     camera.position.copy(startPose.pos);
 
+    // `ultra` spends its frame budget on post-processing, so on desktop it renders at a lower DPR cap.
+    // A tier change only lowers the current DPR; the adaptive path raises it back toward the cap when frames are fast.
+    function applyDesktopDprCap(tier) {
+      if (isCoarseOrMobile) return;
+      maxTargetDpr = Math.min(deviceDprCap, tier === 'ultra' ? 1.25 : 1.35);
+      if (currentActiveDpr > maxTargetDpr) {
+        currentActiveDpr = maxTargetDpr;
+        applyRendererSize();
+      }
+    }
+
     // The settings event only fires on changes, so the first build reads the tier directly.
+    applyDesktopDprCap(qualityTier);
     buildPostComposer(qualityTier);
     window.addEventListener('wizardchess:visual-settings', (e) => {
       if (e.detail.qualityTier === builtTier) return;
+      applyDesktopDprCap(e.detail.qualityTier);
       buildPostComposer(e.detail.qualityTier);
     });
 
