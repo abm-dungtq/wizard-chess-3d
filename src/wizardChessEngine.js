@@ -3718,31 +3718,7 @@ export function initWizardChess() {
       return setFloorStoneLook(0);
     }
 
-    const ASSET_FORMAT = 'glb'; // 'b64' restores the old gzip+base64 files
     const ASSET_CACHE_VER = 'v=meshopt_v1';
-
-    async function fetchB64Model(baseName) {
-      const resB64 = await fetch(`./assets/glb/${baseName}.glb.gz.b64?${ASSET_CACHE_VER}`);
-      if (!resB64.ok) throw new Error(`Failed to fetch ${baseName}`);
-      const b64Text = (await resB64.text()).trim();
-      let gzBytes = null;
-      if (typeof Uint8Array.fromBase64 === 'function') {
-        try {
-          gzBytes = Uint8Array.fromBase64(b64Text);
-        } catch (e) {
-          gzBytes = null;
-        }
-      }
-      if (!gzBytes) {
-        const binStr = atob(b64Text);
-        gzBytes = new Uint8Array(binStr.length);
-        for (let i = 0; i < binStr.length; i++) {
-          gzBytes[i] = binStr.charCodeAt(i);
-        }
-      }
-      const stream = new Blob([gzBytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-      return new Response(stream).arrayBuffer();
-    }
 
     // Cloudflare does not compress .glb, so models ship as .glb.gz and are inflated here.
     async function fetchGlbModel(baseName) {
@@ -3759,7 +3735,7 @@ export function initWizardChess() {
     }
 
     async function loadGltfModel(baseName) {
-      const arrayBuffer = ASSET_FORMAT === 'b64' ? await fetchB64Model(baseName) : await fetchGlbModel(baseName);
+      const arrayBuffer = await fetchGlbModel(baseName);
       return new Promise((resolve, reject) => {
         gltfLoader.parse(arrayBuffer, './assets/glb/', (gltf) => resolve(gltf), (err) => reject(err));
       });

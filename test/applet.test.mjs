@@ -39,6 +39,15 @@ import { RoomStore, generateRoomCode, handleRoomApiRequest, handleFeedbackApiReq
 
 const ROOT = process.cwd();
 
+// Shipped models are meshopt-compressed .glb files with a gzip layer.
+const readGlbAsset = (relPath) => zlib.gunzipSync(fs.readFileSync(path.join(ROOT, 'public/assets/glb', `${relPath}.glb.gz`)));
+async function createMeshoptGltfLoader() {
+  const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
+  const { MeshoptDecoder } = await import('three/examples/jsm/libs/meshopt_decoder.module.js');
+  await MeshoptDecoder.ready;
+  return new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+}
+
 function createEmptyPureBoard() {
   return Array.from({ length: 8 }, () => Array(8).fill(null));
 }
@@ -85,7 +94,7 @@ test('Simplified Single-Player HUD in src/App.tsx excludes speed sliders, notati
   }
 });
 
-test('All 7 compressed 3D assets (.glb.gz.b64) decode and gunzip to valid glTF 2.0 binary models', () => {
+test('All compressed 3D assets (.glb.gz) gunzip to valid glTF 2.0 binary models', () => {
   const expectedModels = [
     'option8_cathedral',
     'pawn_white',
@@ -113,13 +122,11 @@ test('All 7 compressed 3D assets (.glb.gz.b64) decode and gunzip to valid glTF 2
   }
 
   for (const name of expectedModels) {
-    const b64Path = path.join(ROOT, 'public/assets/glb', `${name}.glb.gz.b64`);
-    assert.ok(fs.existsSync(b64Path), `Missing 3D asset ${b64Path}`);
-    const b64Text = fs.readFileSync(b64Path, 'utf-8').trim();
-    assert.ok(b64Text.length > 1000, `Asset ${name}.glb.gz.b64 is unexpectedly small`);
+    const gzPath = path.join(ROOT, 'public/assets/glb', `${name}.glb.gz`);
+    assert.ok(fs.existsSync(gzPath), `Missing 3D asset ${gzPath}`);
+    assert.ok(fs.statSync(gzPath).size > 1000, `Asset ${name}.glb.gz is unexpectedly small`);
 
-    const gzBuf = Buffer.from(b64Text, 'base64');
-    const glbBuf = zlib.gunzipSync(gzBuf);
+    const glbBuf = zlib.gunzipSync(fs.readFileSync(gzPath));
 
     const magic = glbBuf.toString('ascii', 0, 4);
     const version = glbBuf.readUInt32LE(4);
@@ -562,7 +569,6 @@ test('Runtime 3D Performance Contract: Hitbox proxy raycast, async AI job guard,
 
 test('Three.js Hitbox Proxy Raycast & Sub-Mesh Consolidation: Invisible CylinderGeometry proxy & static board squares resolve clicks in < 1ms and GLB gold sub-meshes merge', async () => {
   const THREE = await import('three');
-  const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
   const SkeletonUtils = await import('three/examples/jsm/utils/SkeletonUtils.js');
   const { mergeGeometries } = await import('three/examples/jsm/utils/BufferGeometryUtils.js');
 
@@ -671,11 +677,10 @@ test('Three.js Hitbox Proxy Raycast & Sub-Mesh Consolidation: Invisible Cylinder
   assert.equal(hitsSq[0].object.userData.r, 4);
   assert.equal(hitsSq[0].object.userData.c, 4);
 
-  // Verify real pawn_white.glb.gz.b64 gold sub-meshes (HogwartsTrim_AntiqueGold + HogwartsGlow_Gold) merge cleanly
-  const b64 = fs.readFileSync(path.join(ROOT, 'public/assets/glb/pawn_white.glb.gz.b64'), 'utf-8').trim();
-  const glb = zlib.gunzipSync(Buffer.from(b64, 'base64'));
+  // Verify real pawn_white.glb.gz gold sub-meshes (HogwartsTrim_AntiqueGold + HogwartsGlow_Gold) merge cleanly
+  const glb = readGlbAsset('pawn_white');
   const ab = glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength);
-  const loader = new GLTFLoader();
+  const loader = await createMeshoptGltfLoader();
   const gltf = await new Promise((resolve, reject) => loader.parse(ab, '', resolve, reject));
 
   const goldSubMeshes = [];
@@ -687,7 +692,7 @@ test('Three.js Hitbox Proxy Raycast & Sub-Mesh Consolidation: Invisible Cylinder
       }
     }
   });
-  assert.equal(goldSubMeshes.length, 2, 'Expected 2 gold sub-meshes in pawn_white.glb.gz.b64 before consolidation');
+  assert.equal(goldSubMeshes.length, 2, 'Expected 2 gold sub-meshes in pawn_white.glb.gz before consolidation');
   const mergedGoldGeo = mergeGeometries(
     goldSubMeshes.map((m) => m.geometry),
     false
@@ -706,7 +711,6 @@ test('Three.js Hitbox Proxy Raycast & Sub-Mesh Consolidation: Invisible Cylinder
 
 test('Startup & First-Frame Anti-Freeze Safeguards (Shader Stall, SkinnedMesh Frustum Culling & Concurrent Load)', async () => {
   const THREE = await import('three');
-  const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
   const SkeletonUtils = await import('three/examples/jsm/utils/SkeletonUtils.js');
   const engineJs = fs.readFileSync(path.join(ROOT, 'src/wizardChessEngine.js'), 'utf-8');
   const appTsx = fs.readFileSync(path.join(ROOT, 'src/App.tsx'), 'utf-8');
@@ -735,8 +739,8 @@ test('Startup & First-Frame Anti-Freeze Safeguards (Shader Stall, SkinnedMesh Fr
     'Engine must load cathedral and piece GLB assets concurrently'
   );
   assert.ok(
-    engineJs.includes('Uint8Array.fromBase64'),
-    'Engine must use native Uint8Array.fromBase64 when available'
+    engineJs.includes('.glb.gz?${ASSET_CACHE_VER}') && !engineJs.includes('.glb.gz.b64') && !engineJs.includes('atob('),
+    'Engine must fetch binary .glb.gz models without a base64 decode step'
   );
   assert.ok(
     engineJs.includes('triggerAIMoveAsync'),
@@ -758,10 +762,9 @@ test('Startup & First-Frame Anti-Freeze Safeguards (Shader Stall, SkinnedMesh Fr
   );
 
   // Verify pre-populated SkinnedMesh.boundingSphere prevents 1.15M-vertex CPU applyBoneTransform during Frustum culling
-  const b64 = fs.readFileSync(path.join(ROOT, 'public/assets/glb/pawn_white.glb.gz.b64'), 'utf-8').trim();
-  const glb = zlib.gunzipSync(Buffer.from(b64, 'base64'));
+  const glb = readGlbAsset('pawn_white');
   const ab = glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength);
-  const loader = new GLTFLoader();
+  const loader = await createMeshoptGltfLoader();
   const gltf = await new Promise((resolve, reject) => loader.parse(ab, '', resolve, reject));
 
   gltf.scene.traverse((child) => {
@@ -1496,9 +1499,8 @@ test('19. Steady 3D Combat Camera (No Zoom-In/Out Sickness) & 3-Layer Piece Iden
   );
 });
 
-test('20. Newly Sculpted 3D Xiangqi Assets: All 7 .glb.gz.b64 models decompress, parse via GLTFLoader, and contain 4-bone PieceArmature + 4 animation clips', async () => {
-  const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
-  const loader = new GLTFLoader();
+test('20. Newly Sculpted 3D Xiangqi Assets: All 7 .glb.gz models decompress, parse via GLTFLoader, and contain 4-bone PieceArmature + 4 animation clips', async () => {
+  const loader = await createMeshoptGltfLoader();
   const xiangqiPieceFiles = [
     'king_white',
     'advisor_white',
@@ -1510,13 +1512,12 @@ test('20. Newly Sculpted 3D Xiangqi Assets: All 7 .glb.gz.b64 models decompress,
   ];
 
   for (const name of xiangqiPieceFiles) {
-    const b64Path = path.join(ROOT, 'public/assets/glb/xiangqi', `${name}.glb.gz.b64`);
-    assert.ok(fs.existsSync(b64Path), `Missing sculpted Xiangqi 3D asset: ${b64Path}`);
-    const b64Text = fs.readFileSync(b64Path, 'utf-8').trim();
-    assert.ok(b64Text.length > 5000, `Xiangqi asset ${name}.glb.gz.b64 is unexpectedly small (${b64Text.length} chars)`);
+    const gzPath = path.join(ROOT, 'public/assets/glb/xiangqi', `${name}.glb.gz`);
+    assert.ok(fs.existsSync(gzPath), `Missing sculpted Xiangqi 3D asset: ${gzPath}`);
+    const gzBytes = fs.statSync(gzPath).size;
+    assert.ok(gzBytes > 5000, `Xiangqi asset ${name}.glb.gz is unexpectedly small (${gzBytes} bytes)`);
 
-    const gzBuf = Buffer.from(b64Text, 'base64');
-    const glbBuf = zlib.gunzipSync(gzBuf);
+    const glbBuf = zlib.gunzipSync(fs.readFileSync(gzPath));
     assert.equal(glbBuf.toString('ascii', 0, 4), 'glTF', `Invalid glTF magic header for xiangqi/${name}`);
     assert.equal(glbBuf.readUInt32LE(4), 2, `Invalid glTF version for xiangqi/${name}`);
     assert.equal(glbBuf.readUInt32LE(8), glbBuf.length, `Mismatched glTF byte length for xiangqi/${name}`);
@@ -2189,11 +2190,11 @@ test('every model asset has a gzipped binary glb', () => {
     fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
       e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]
     );
-  const sources = walk(root).filter((f) => f.endsWith('.glb.gz.b64'));
-  assert.ok(sources.length > 0);
-  for (const source of sources) {
-    const gz = source.replace(/\.glb\.gz\.b64$/, '.glb.gz');
-    assert.ok(fs.existsSync(gz), `missing ${path.relative(root, gz)}`);
+  const files = walk(root);
+  assert.equal(files.filter((f) => f.endsWith('.b64')).length, 0, 'the old .glb.gz.b64 format is gone');
+  const models = files.filter((f) => f.endsWith('.glb.gz'));
+  assert.equal(models.length, 56);
+  for (const gz of models) {
     assert.equal(zlib.gunzipSync(fs.readFileSync(gz)).subarray(0, 4).toString('ascii'), 'glTF', path.relative(root, gz));
   }
   assert.ok(fs.existsSync(path.join(process.cwd(), 'scripts/copy-basis-transcoder.mjs')));

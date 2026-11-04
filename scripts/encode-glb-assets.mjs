@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * Re-encodes every model under public/assets/glb as a binary .glb with meshopt geometry.
+ * Encodes plain .glb sources (e.g. Blender exports) into the shipped meshopt .glb.gz models.
  * Textured models also get KTX2 (ETC1S) textures when KTX-Software is installed.
  *
  * Usage:
- *   node scripts/encode-glb-assets.mjs           encode every *.glb.gz.b64 into a sibling *.glb.gz
+ *   node scripts/encode-glb-assets.mjs <sourceDir> [targetDir]           encode every .glb under sourceDir into
+ *                                                                        targetDir/<same relative path>.glb.gz
+ *   node scripts/encode-glb-assets.mjs --check <sourceDir> [targetDir]   compare each pair: counts, names, mesh bounds and skins
  *
- *   node scripts/encode-glb-assets.mjs --check   compare each pair: counts, names, mesh bounds and skins
- *
+ * targetDir defaults to public/assets/glb. `npm run glb:unpack` writes editable sources from the shipped models.
  * The game fetches *.glb.gz: Cloudflare does not compress model/gltf-binary, so the gzip layer lives in the file.
  * /assets/* is served immutable for a year: after re-encoding, bump ASSET_CACHE_VER in src/wizardChessEngine.js.
  */
@@ -24,17 +25,23 @@ import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 const ASSET_DIR = path.join(process.cwd(), 'public/assets/glb');
 const BOUNDS_TOLERANCE = 0.01;
 
+const positionalArgs = process.argv.slice(2).filter((arg) => arg !== '--check');
+if (!positionalArgs[0]) {
+  console.error('Usage: node scripts/encode-glb-assets.mjs [--check] <sourceDir> [targetDir]  (npm run glb:encode -- <sourceDir>)');
+  process.exit(1);
+}
+const SOURCE_DIR = path.resolve(positionalArgs[0]);
+const TARGET_DIR = positionalArgs[1] ? path.resolve(positionalArgs[1]) : ASSET_DIR;
+
 function listSources(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) return listSources(full);
-    return entry.name.endsWith('.glb.gz.b64') ? [full] : [];
+    return entry.name.endsWith('.glb') ? [full] : [];
   });
 }
 
-const decodeB64 = (file) => zlib.gunzipSync(Buffer.from(fs.readFileSync(file, 'utf8'), 'base64'));
-const glbPathFor = (source) => source.replace(/\.glb\.gz\.b64$/, '.glb');
-const gzPathFor = (source) => `${glbPathFor(source)}.gz`;
+const gzPathFor = (source) => `${path.join(TARGET_DIR, path.relative(SOURCE_DIR, source))}.gz`;
 
 function findKtxTool() {
   for (const tool of ['ktx', 'toktx']) {
@@ -57,11 +64,11 @@ async function createIO() {
 async function encode() {
   const io = await createIO();
   const ktxTool = findKtxTool();
-  let totalB64 = 0;
-  let totalGlb = 0;
+  let totalSource = 0;
+  let totalGz = 0;
 
-  for (const source of listSources(ASSET_DIR)) {
-    const doc = await io.readBinary(new Uint8Array(decodeB64(source)));
+  for (const source of listSources(SOURCE_DIR)) {
+    const doc = await io.read(source);
     // meshopt() reorders and quantizes on its own; simplify/resample are left out because they change shapes and clips.
     // Materials are never merged: the engine finds some of them by name (e.g. the cathedral's Lancet glass).
     await doc.transform(
@@ -71,7 +78,7 @@ async function encode() {
       meshopt({ encoder: MeshoptEncoder, level: 'medium' })
     );
     // The plain .glb is only a scratch file for the optional KTX2 step; the game ships the .glb.gz.
-    const out = path.join(os.tmpdir(), `meshopt-${path.basename(glbPathFor(source))}`);
+    const out = path.join(os.tmpdir(), `meshopt-${path.basename(source)}`);
     fs.writeFileSync(out, await io.writeBinary(doc));
 
     if (doc.getRoot().listTextures().length > 0) {
@@ -84,16 +91,17 @@ async function encode() {
       }
     }
 
+    fs.mkdirSync(path.dirname(gzPathFor(source)), { recursive: true });
     fs.writeFileSync(gzPathFor(source), zlib.gzipSync(fs.readFileSync(out), { level: 9 }));
     fs.rmSync(out);
 
-    const b64Bytes = fs.statSync(source).size;
-    const glbBytes = fs.statSync(gzPathFor(source)).size;
-    totalB64 += b64Bytes;
-    totalGlb += glbBytes;
-    console.log(`${path.relative(ASSET_DIR, gzPathFor(source))} b64=${b64Bytes} glb=${glbBytes} ratio=${(glbBytes / b64Bytes).toFixed(2)} (glb.gz)`);
+    const sourceBytes = fs.statSync(source).size;
+    const gzBytes = fs.statSync(gzPathFor(source)).size;
+    totalSource += sourceBytes;
+    totalGz += gzBytes;
+    console.log(`${path.relative(TARGET_DIR, gzPathFor(source))} glb=${sourceBytes} glb.gz=${gzBytes} ratio=${(gzBytes / sourceBytes).toFixed(2)}`);
   }
-  console.log(`TOTAL b64=${totalB64} glb.gz=${totalGlb}`);
+  console.log(`TOTAL glb=${totalSource} glb.gz=${totalGz}`);
 }
 
 function multiplyMat4(a, b) {
@@ -187,15 +195,15 @@ function compareBounds(a, b) {
 async function check() {
   const io = await createIO();
   const problems = [];
-  const sources = listSources(ASSET_DIR);
+  const sources = listSources(SOURCE_DIR);
 
   for (const source of sources) {
-    const name = path.relative(ASSET_DIR, gzPathFor(source));
+    const name = path.relative(TARGET_DIR, gzPathFor(source));
     if (!fs.existsSync(gzPathFor(source))) {
       problems.push(`${name}: missing`);
       continue;
     }
-    const before = summarize(await io.readBinary(new Uint8Array(decodeB64(source))));
+    const before = summarize(await io.read(source));
     const after = summarize(await io.readBinary(new Uint8Array(zlib.gunzipSync(fs.readFileSync(gzPathFor(source))))));
     for (const key of ['meshes', 'skins', 'channels']) {
       if (before[key] !== after[key]) problems.push(`${name}: ${key} ${before[key]} -> ${after[key]}`);
