@@ -1355,6 +1355,19 @@ export function initWizardChess() {
       emissiveIntensity: 0.25
     });
 
+    // Board and altar gold follows the white trim's colour, but never as polished as piece trim:
+    // under bloom, a mirror-like rail reflects the cathedral light as a glare across the board edge.
+    const BOARD_GOLD_MIN_ROUGHNESS = 0.34;
+    const boardGoldTrimMat = goldTrimMat.clone();
+    function syncBoardGoldTrim() {
+      boardGoldTrimMat.color.copy(goldTrimMat.color);
+      boardGoldTrimMat.metalness = goldTrimMat.metalness;
+      boardGoldTrimMat.roughness = Math.max(goldTrimMat.roughness, BOARD_GOLD_MIN_ROUGHNESS);
+      boardGoldTrimMat.emissive.copy(goldTrimMat.emissive);
+      boardGoldTrimMat.emissiveIntensity = goldTrimMat.emissiveIntensity;
+    }
+    syncBoardGoldTrim();
+
     const blackTrimMat = goldTrimMat.clone();
     const blackSteelMat = forgedSteelMat.clone();
     const whiteAccentMat = new THREE.MeshStandardMaterial({
@@ -2340,6 +2353,7 @@ export function initWizardChess() {
           applyMat(whiteBishopAccentMat, CHESS_DEFAULT_ROLE_MATERIALS.whiteBishopAccent);
         }
       }
+      syncBoardGoldTrim();
       if (sideOption === 'both' || sideOption === 'b') {
         activeSkinBlack = theme.id;
         if (useXiangqiCrimsonObsidian) {
@@ -2637,8 +2651,8 @@ export function initWizardChess() {
       const hCurbGeo = new THREE.BoxGeometry(halfDeck * 2 + outerCurbW * 2, outerCurbH, outerCurbW);
       const vCurbGeo = new THREE.BoxGeometry(outerCurbW, outerCurbH, halfDeck * 2);
       for (const s of [-1, 1]) {
-        addStaticAltarMesh(hCurbGeo, goldTrimMat, 0, 0.752, s * halfDeck);
-        addStaticAltarMesh(vCurbGeo, goldTrimMat, s * halfDeck, 0.752, 0);
+        addStaticAltarMesh(hCurbGeo, boardGoldTrimMat, 0, 0.752, s * halfDeck);
+        addStaticAltarMesh(vCurbGeo, boardGoldTrimMat, s * halfDeck, 0.752, 0);
       }
 
       // 4 Corner Sentinel Relic Pylons with floating Arcane Crystals at (±2.02, 0.75, ±2.02)
@@ -2656,7 +2670,7 @@ export function initWizardChess() {
       cornerCoords.forEach(([cx, cz], idx) => {
         addStaticAltarMesh(pylonBaseGeo, darkObsidianPlinthMat, cx, 0.81, cz);
         const capRing = new THREE.CylinderGeometry(0.12, 0.12, 0.024, 8);
-        addStaticAltarMesh(capRing, goldTrimMat, cx, 0.885, cz);
+        addStaticAltarMesh(capRing, boardGoldTrimMat, cx, 0.885, cz);
 
         const crystalMat = sanctumMoatGlowMat.clone();
         const crystalMesh = new THREE.Mesh(crystalGeo, crystalMat);
@@ -2664,7 +2678,7 @@ export function initWizardChess() {
         crystalMesh.raycast = () => {};
         sanctumAltarGroup.add(crystalMesh);
 
-        const ringMesh = new THREE.Mesh(orbitRingGeo, goldTrimMat);
+        const ringMesh = new THREE.Mesh(orbitRingGeo, boardGoldTrimMat);
         ringMesh.position.set(cx, 1.04, cz);
         ringMesh.rotation.x = Math.PI * 0.35;
         ringMesh.raycast = () => {};
@@ -3248,7 +3262,7 @@ export function initWizardChess() {
       const hRimGeo = new THREE.BoxGeometry(halfW * 2 + rimW * 2, rimH, rimW);
       const vRimGeo = new THREE.BoxGeometry(rimW, rimH, halfD * 2);
       for (const s of [-1, 1]) {
-        const hBar = new THREE.Mesh(hRimGeo, goldTrimMat);
+        const hBar = new THREE.Mesh(hRimGeo, boardGoldTrimMat);
         hBar.position.set(0, BOARD_SURFACE_Y - rimH * 0.42, s * (halfD + rimW * 0.5));
         hBar.receiveShadow = true;
         hBar.raycast = () => {};
@@ -3256,7 +3270,7 @@ export function initWizardChess() {
         hBar.matrixAutoUpdate = false;
         xiangqiBoardDeckGroup.add(hBar);
 
-        const vBar = new THREE.Mesh(vRimGeo, goldTrimMat);
+        const vBar = new THREE.Mesh(vRimGeo, boardGoldTrimMat);
         vBar.position.set(s * (halfW + rimW * 0.5), BOARD_SURFACE_Y - rimH * 0.42, 0);
         vBar.receiveShadow = true;
         vBar.raycast = () => {};
@@ -3316,7 +3330,7 @@ export function initWizardChess() {
       const rankLineGeo = new THREE.BoxGeometry(boardW + lineThick, lineH, lineThick);
       for (let r = 0; r < 10; r++) {
         const z = (r - 4.5) * XIANGQI_SQ_SIZE;
-        const rLine = new THREE.Mesh(rankLineGeo, goldTrimMat);
+        const rLine = new THREE.Mesh(rankLineGeo, boardGoldTrimMat);
         rLine.position.set(0, BOARD_SURFACE_Y + 0.0028, z);
         rLine.raycast = () => {};
         rLine.updateMatrix();
@@ -3329,7 +3343,7 @@ export function initWizardChess() {
       for (let c = 0; c < 9; c++) {
         const x = (c - 4.0) * XIANGQI_SQ_SIZE;
         if (c === 0 || c === 8) {
-          const fLine = new THREE.Mesh(fullFileGeo, goldTrimMat);
+          const fLine = new THREE.Mesh(fullFileGeo, boardGoldTrimMat);
           fLine.position.set(x, BOARD_SURFACE_Y + 0.0028, 0);
           fLine.raycast = () => {};
           fLine.updateMatrix();
@@ -3337,7 +3351,7 @@ export function initWizardChess() {
           xiangqiBoardDeckGroup.add(fLine);
         } else {
           for (const bankSign of [-1, 1]) {
-            const hLine = new THREE.Mesh(halfFileGeo, goldTrimMat);
+            const hLine = new THREE.Mesh(halfFileGeo, boardGoldTrimMat);
             hLine.position.set(x, BOARD_SURFACE_Y + 0.0028, bankSign * 2.5 * XIANGQI_SQ_SIZE);
             hLine.raycast = () => {};
             hLine.updateMatrix();
@@ -3352,7 +3366,7 @@ export function initWizardChess() {
       const diagGeo = new THREE.BoxGeometry(lineThick * 0.9, lineH, diagLen);
       for (const palaceZ of [-3.5 * XIANGQI_SQ_SIZE, 3.5 * XIANGQI_SQ_SIZE]) {
         for (const rotSign of [-1, 1]) {
-          const dMesh = new THREE.Mesh(diagGeo, goldTrimMat);
+          const dMesh = new THREE.Mesh(diagGeo, boardGoldTrimMat);
           dMesh.position.set(0, BOARD_SURFACE_Y + 0.003, palaceZ);
           dMesh.rotation.y = rotSign * (Math.PI / 4);
           dMesh.raycast = () => {};
@@ -3373,7 +3387,7 @@ export function initWizardChess() {
       for (const [fr, fc] of fiducialCoords) {
         const fx = (fc - 4.0) * XIANGQI_SQ_SIZE;
         const fz = (fr - 4.5) * XIANGQI_SQ_SIZE;
-        const fMesh = new THREE.Mesh(fidGeo, goldTrimMat);
+        const fMesh = new THREE.Mesh(fidGeo, boardGoldTrimMat);
         fMesh.position.set(fx, BOARD_SURFACE_Y + 0.0034, fz);
         fMesh.raycast = () => {};
         fMesh.updateMatrix();
@@ -3401,7 +3415,7 @@ export function initWizardChess() {
           xiangqiBoardDeckGroup.add(padMesh);
           xiangqiSquareMeshes.push(padMesh);
 
-          const studMesh = new THREE.Mesh(nodeStudGeo, goldTrimMat);
+          const studMesh = new THREE.Mesh(nodeStudGeo, boardGoldTrimMat);
           studMesh.position.set(ix, BOARD_SURFACE_Y + 0.0025, iz);
           studMesh.raycast = () => {};
           studMesh.updateMatrix();
@@ -3454,7 +3468,7 @@ export function initWizardChess() {
       const horizGeo = new THREE.BoxGeometry(halfB * 2 + rimW * 2, rimH, rimW);
       const vertGeo = new THREE.BoxGeometry(rimW, rimH, halfB * 2);
       for (const s of [-1, 1]) {
-        const hBar = new THREE.Mesh(horizGeo, goldTrimMat);
+        const hBar = new THREE.Mesh(horizGeo, boardGoldTrimMat);
         hBar.position.set(0, BOARD_SURFACE_Y - rimH * 0.42, s * (halfB + rimW * 0.5));
         hBar.receiveShadow = true;
         hBar.raycast = () => {};
@@ -3462,7 +3476,7 @@ export function initWizardChess() {
         hBar.matrixAutoUpdate = false;
         chessBoardDeckGroup.add(hBar);
 
-        const vBar = new THREE.Mesh(vertGeo, goldTrimMat);
+        const vBar = new THREE.Mesh(vertGeo, boardGoldTrimMat);
         vBar.position.set(s * (halfB + rimW * 0.5), BOARD_SURFACE_Y - rimH * 0.42, 0);
         vBar.receiveShadow = true;
         vBar.raycast = () => {};

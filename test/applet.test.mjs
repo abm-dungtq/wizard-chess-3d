@@ -2184,6 +2184,20 @@ test('visual settings resolve motion and quality tiers', async () => {
   assert.equal(downgradeTier('base'), 'base');
 });
 
+test('board and altar gold never take the polished piece-trim finish', () => {
+  const engineJs = fs.readFileSync(path.join(ROOT, 'src/wizardChessEngine.js'), 'utf-8');
+  assert.match(engineJs, /const BOARD_GOLD_MIN_ROUGHNESS = 0\.3\d;/);
+  assert.ok(engineJs.includes('Math.max(goldTrimMat.roughness, BOARD_GOLD_MIN_ROUGHNESS)'));
+  // Board rims, grid lines and altar curbs must not share the piece trim material that themes polish.
+  for (const geo of ['hRimGeo', 'vRimGeo', 'rankLineGeo', 'fullFileGeo', 'halfFileGeo', 'diagGeo', 'horizGeo', 'vertGeo', 'hCurbGeo', 'vCurbGeo']) {
+    assert.ok(!new RegExp(`\\b${geo}, goldTrimMat\\b`).test(engineJs), `${geo} still uses goldTrimMat`);
+    assert.ok(new RegExp(`\\b${geo}, boardGoldTrimMat\\b`).test(engineJs), `${geo} should use boardGoldTrimMat`);
+  }
+  const applyAt = engineJs.indexOf("applyMat(goldTrimMat, theme.trim);");
+  const syncAt = engineJs.indexOf('syncBoardGoldTrim();', applyAt);
+  assert.ok(applyAt > 0 && syncAt > applyAt, 'theme changes must re-sync the board gold');
+});
+
 test('every model asset has a gzipped binary glb', () => {
   const root = path.join(process.cwd(), 'public/assets/glb');
   const walk = (dir) =>
