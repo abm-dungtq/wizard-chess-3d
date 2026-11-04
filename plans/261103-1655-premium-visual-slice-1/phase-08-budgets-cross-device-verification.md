@@ -107,16 +107,16 @@ pr: PR B
 
 | # | Criterion | Measured | Pass |
 |---|---|---|---|
-| 1a | `ultra` checkmate: median uncapped mean ≤ 12 ms, ≤ 2 frames > 33 ms per run, vsync-on p95 ≤ 17 ms | | |
-| 1b | `base` phone p95 ≤ 16.6 ms | | |
-| 2 | First playable ≤ 10 MB on the wire (staging) | | |
-| 2b | Each skin set ≤ 3.5 MB (staging) | | |
-| 3 | 0 badges idle, 1 when selected (1470x956) | | |
-| 4 | HUD ≤ 114 px at 1470x956 | | |
-| 5 | reduced-motion → `off`; no kill-cam at `off` | | |
-| 6 | `contextState` running before first move | | |
-| 7 | lint, unit, e2e green | | |
-| 8 | WebKit iPhone + Chromium Pixel smoke green | | |
+| 1a | `ultra` checkmate: median uncapped mean ≤ 12 ms, ≤ 2 frames > 33 ms per run, vsync-on p95 ≤ 17 ms | Median 11.44 ms, 1 frame > 33 ms per run, DPR 1.25 (after ladder steps 1-2). Vsync-on not judged: no 60 Hz display (both monitors run at 100 Hz) | Uncapped yes; vsync open |
+| 1b | `base` phone p95 ≤ 16.6 ms | 9.8 ms (Pixel 7, CPU 4×) | Yes |
+| 2 | First playable ≤ 10 MB on the wire (staging) | 8,884,545 bytes (cathedral 4,999,106) | Yes |
+| 2b | Each skin set ≤ 3.5 MB (staging) | 924,957 – 997,344 bytes | Yes |
+| 3 | 0 badges idle, 1 when selected (1470x956) | 0 / 1 (`labels show only for selection and hover by default`) | Yes |
+| 4 | HUD ≤ 114 px at 1470x956 | ≤ 114 after the first move (`desktop HUD is one glass dock…`) | Yes |
+| 5 | reduced-motion → `off`; no kill-cam at `off` | Both covered by `motion level follows reduced-motion…` and `kill-cam runs on checkmate…` | Yes |
+| 6 | `contextState` running before first move | `audio unlocks on first gesture before the first move` | Yes |
+| 7 | lint, unit, e2e green | lint OK, 31 unit, 22 e2e passed + 6 skipped (1 existing, 5 `PERF=1` only) | Yes |
+| 8 | WebKit iPhone + Chromium Pixel smoke green | 22 passed, 2 skipped (desktop-only tests deselected) | Yes |
 
 ## Residual checks for the user (not automatable here)
 
@@ -144,6 +144,9 @@ pr: PR B
   - Result: **22 passed, 2 skipped** (the existing canvas-click skip, once per device). That is 11 per device, including the phone check.
   - An earlier run without the GPU flags fell back to software rendering on Pixel 7 (2 frames instead of 20+ in the tween test) and was discarded.
 - Task 8.6 screenshots at 1470x956: `visuals/after-spectator-ultra.png`, `after-spectator-base.png`, `after-killcam-ultra.png`, plus `hud-after-phone.png` (390x844) and the before/after pairs `hud-before-*`/`hud-after-*` and `base-before.png`/`base-after.png`. Waiting for the user's approval.
+- Task 8.4, with the user's approval ("Deploy staging"): staging deployed as version `ade8c2ea-3b9c-417c-91cb-dc57d3bcc7bb`, then production rebuilt locally (`dist/wizard_chess_3d/wrangler.json` name `wizard-chess-3d`). `king_white.glb.gz` returns `content-type: application/gzip` with no `content-encoding`, as expected. `cache-control` repeats its value (`public, max-age=31536000, immutable` twice); this is harmless but worth tidying in the headers config later.
+- Task 8.4 transfer (fresh context, staging): total **8,884,545 bytes ≤ 10,485,760, passed**. Five largest: `option8_cathedral.glb.gz` 4,999,106; `demo-xiangqi-arena.jpg` 488,708; `demo-chess-arena.jpg` 463,330; `index-*.js` 429,418; `king_white.glb.gz` 270,004.
+- Task 8.4b per-set transfer (staging), all **≤ 3,670,016, passed**: dong_son 997,344; shogun_yokai 937,148; abyssal_lich 934,017; bauhaus_imperial 924,957; mecha_ronin 925,770; pharaoh_anubis 945,263; valhalla_valkyrie 972,184.
 
 ## Failure Protocol
 If any Verify step does not meet its stated pass condition, STOP this phase.
