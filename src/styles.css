@@ -823,8 +823,9 @@ body.cinematic-ui-hidden #piece-inspect-card {
   grid-column: span 2;
 }
 
-/* Full-width Skin Banner inside the consolidated menu */
-#btn-piece-skin {
+/* Full-width rows inside the consolidated menu: the skin banner and the default 3/4 camera */
+#btn-piece-skin,
+#btn-cam-spectator {
   grid-column: span 6;
 }
 
