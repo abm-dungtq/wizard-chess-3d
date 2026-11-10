@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { createPieceEffects, PIECE_EFFECT_WEIGHTS } from './pieceEffects.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -2196,6 +2197,10 @@ export function initWizardChess() {
     const activeMixers = [];
     const shatterDebris = [];
     const combatVfxList = [];
+    let pieceEffects = null;
+    // One-shot reactions to a check: the king recoils and the braziers flare.
+    let checkFlinch = null;
+    let brazierFlare = 0;
     const clock = new THREE.Clock();
 
     function clearCombatVfx() {
@@ -2206,6 +2211,8 @@ export function initWizardChess() {
         }
       }
       combatVfxList.length = 0;
+      pieceEffects?.clear();
+      checkFlinch = null;
     }
 
     const boardGroup = new THREE.Group();
@@ -2287,6 +2294,15 @@ export function initWizardChess() {
 
     const TABLE_APRON_HALF = 2.5;
     const TABLE_PYLON_OFFSET = 2.34;
+    // Shatter chunks are copies of the struck piece seen through per-material clipping planes.
+    renderer.localClippingEnabled = true;
+    pieceEffects = createPieceEffects({
+      scene,
+      boardY: BOARD_SURFACE_Y,
+      tableHalf: TABLE_APRON_HALF,
+      getMotionLevel: () => motionLevel,
+      getQualityTier: () => qualityTier
+    });
     function buildSanctumArenaAltar() {
       const addStaticAltarMesh = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0, recvShadow = true) => {
         const m = new THREE.Mesh(geo, mat);
@@ -4300,6 +4316,11 @@ export function initWizardChess() {
     }
 
     // Piece-Specific Locomotion Gait Physics (smooth stride cadence, hover lift, pitch lean, and roll sway)
+    // Shares of a move's duration spent on the crouch before it and the squash at its end.
+    const MOVE_TRACE_WHITE_HEX = 0xfff1cc;
+    const MOVE_TRACE_BLACK_HEX = 0x86a4ff;
+    const MOVE_ANTICIPATION_SPAN = 0.16;
+    const MOVE_SETTLE_SPAN = 0.16;
     const LOCOMOTION_GAIT_PROFILES = {
       pawn:     { moveTimeScale: 0.96, stepFreqPerSq: 2.0, stepLift: 0.018, hoverLift: 0.000, pitchLean: 0.075, rollSway: 0.032 },
       advisor:  { moveTimeScale: 0.94, stepFreqPerSq: 1.6, stepLift: 0.014, hoverLift: 0.010, pitchLean: 0.068, rollSway: 0.030 },
@@ -4324,7 +4345,7 @@ export function initWizardChess() {
         secondContactClip: 0.62,
         blowClip: 0.78,
         maxLunge: 0.145,
-        hitStopDuration: 0
+        hitStopDuration: 0.03
       },
       advisor: {
         signatureId: 'advisor_imperial_twin_blades',
@@ -4336,7 +4357,7 @@ export function initWizardChess() {
         secondContactClip: 0.58,
         blowClip: 0.76,
         maxLunge: 0.135,
-        hitStopDuration: 0
+        hitStopDuration: 0.03
       },
       elephant: {
         signatureId: 'elephant_war_tusk_quake',
@@ -4384,7 +4405,7 @@ export function initWizardChess() {
         secondContactClip: 0,
         blowClip: 0.75,
         maxLunge: 0.220,
-        hitStopDuration: 0
+        hitStopDuration: 0.04
       },
       bishop: {
         signatureId: 'bishop_celestial_judgment',
@@ -4396,7 +4417,7 @@ export function initWizardChess() {
         secondContactClip: 0,
         blowClip: 0.78,
         maxLunge: 0.025,
-        hitStopDuration: 0
+        hitStopDuration: 0.035
       },
       queen: {
         signatureId: 'queen_valkyrie_whirlwind_nova',
@@ -4408,7 +4429,7 @@ export function initWizardChess() {
         secondContactClip: 0.56,
         blowClip: 0.77,
         maxLunge: 0.150,
-        hitStopDuration: 0
+        hitStopDuration: 0.035
       },
       king: {
         signatureId: 'king_sovereign_lightning_cleave',
@@ -5295,6 +5316,17 @@ export function initWizardChess() {
       depthWrite: false
     }));
 
+    // The line of a check: drawn on the board from each checking piece to the king.
+    const sharedCheckLineGeo = markSharedPoolAsset(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2));
+    const sharedCheckLineMat = markSharedPoolAsset(new THREE.MeshBasicMaterial({
+      color: 0xff2a38,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false
+    }));
+    const CHECK_LINE_WIDTH = 0.06;
+    const CHECK_FLINCH_DURATION = 0.42;
+
     const sharedSelRingGeoDesktop = markSharedPoolAsset((() => {
       const g = new THREE.RingGeometry(BOARD_SQ_SIZE * 0.32, BOARD_SQ_SIZE * 0.43, 32);
       g.rotateX(-Math.PI / 2);
@@ -5441,10 +5473,47 @@ export function initWizardChess() {
               chkMesh.position.set(kPos.x, BOARD_SURFACE_Y + 0.014, kPos.z);
               tacticalMarkersGroup.add(chkMesh);
               activeCheckRingMesh = chkMesh;
+              addCheckLines(r, c, kPos);
               break;
             }
           }
         }
+      }
+    }
+
+    function addCheckLines(kingR, kingC, kingPos) {
+      for (let r = 0; r < getBoardRows(); r++) {
+        for (let c = 0; c < getBoardCols(); c++) {
+          const p = boardState[r]?.[c];
+          if (!p || p.color === currentTurn) continue;
+          if (!getPseudoMovesForPiece(r, c).some((m) => m.r === kingR && m.c === kingC)) continue;
+          const from = boardToWorld(r, c);
+          const dx = kingPos.x - from.x;
+          const dz = kingPos.z - from.z;
+          const line = new THREE.Mesh(sharedCheckLineGeo, sharedCheckLineMat);
+          line.raycast = () => {};
+          line.position.set(from.x + dx * 0.5, BOARD_SURFACE_Y + 0.012, from.z + dz * 0.5);
+          line.rotation.y = Math.atan2(dx, dz);
+          line.scale.set(CHECK_LINE_WIDTH, 1, Math.hypot(dx, dz));
+          tacticalMarkersGroup.add(line);
+        }
+      }
+    }
+
+    // The moment a check lands: the king recoils, the braziers flare and the screen edge pulses red.
+    function triggerCheckAlarm() {
+      if (motionLevel === 'off') return;
+      for (const row of boardState) {
+        for (const p of row) {
+          if (p && p.color === currentTurn && p.type === 'king' && p.mesh) checkFlinch = { piece: p, t: 0 };
+        }
+      }
+      brazierFlare = 1;
+      const vignette = document.getElementById('check-vignette');
+      if (vignette) {
+        vignette.classList.remove('active');
+        void vignette.offsetWidth;
+        vignette.classList.add('active');
       }
     }
 
@@ -6120,8 +6189,8 @@ export function initWizardChess() {
       const bank = sideMats[color] || sideMats.w;
       const shardCount =
         attackerType === 'rook' || attackerType === 'king' || attackerType === 'cannon' || attackerType === 'elephant'
-          ? 24
-          : 20;
+          ? 14
+          : 12;
       for (let i = 0; i < shardCount; i++) {
         const sz = 0.026 + Math.random() * 0.054;
         const fragMat = i % 3 === 0 ? bank.trim : bank.primary;
@@ -6313,6 +6382,7 @@ export function initWizardChess() {
       const defenderBaseScale = captured ? getPieceWorldScale(captured.type) : basePieceScale;
       const gaitProfile = LOCOMOTION_GAIT_PROFILES[piece.type] || LOCOMOTION_GAIT_PROFILES.queen;
       const atkProfile = ATTACK_SYNC_PROFILES[piece.type] || ATTACK_SYNC_PROFILES.queen;
+      const effectWeight = PIECE_EFFECT_WEIGHTS[piece.type] || 0.8;
 
       playPieceClip(piece, 'Move', true, 0.14);
 
@@ -6476,6 +6546,19 @@ export function initWizardChess() {
           pitchX = Math.sin(u * Math.PI * 2) * gaitProfile.pitchLean * archSin;
         }
         const rollZ = cadenceSin * gaitProfile.rollSway * archSin;
+        // Anticipation and settle: a short crouch and lean back before the piece sets off, and a squash as it
+        // lands. Both sit inside the move's own duration, so a move takes no longer than before.
+        if (motionLevel !== 'off') {
+          let squash = 0;
+          if (u < MOVE_ANTICIPATION_SPAN) {
+            const a = Math.sin((u / MOVE_ANTICIPATION_SPAN) * Math.PI);
+            squash = a * 0.07 * effectWeight;
+            pitchX -= a * 0.06 * effectWeight;
+          } else if (settleToHomeAtEnd && u > 1 - MOVE_SETTLE_SPAN) {
+            squash = Math.sin(((u - (1 - MOVE_SETTLE_SPAN)) / MOVE_SETTLE_SPAN) * Math.PI) * 0.09 * effectWeight;
+          }
+          applyPieceBaseScale(piece.mesh, piece.type, 1 + squash * 0.5, 1 - squash);
+        }
         piece.mesh.rotation.set(pitchX, currentYaw, rollZ);
 
         // Smoothly turn defending piece toward incoming attacker during first 45% of approach
@@ -6688,6 +6771,11 @@ export function initWizardChess() {
         : 0;
       const totalDuration = isCapture ? (tStrikeDone + returnDuration) : stdMoveDuration;
       wizardAudio.playMoveSlide(stdMoveDuration);
+      const pathTraceHex = piece.color === 'w' ? MOVE_TRACE_WHITE_HEX : MOVE_TRACE_BLACK_HEX;
+      pieceEffects.spawnPathRibbon(startPos, isCapture ? strikePos : endPos, pathTraceHex, isCapture ? tApproach : stdMoveDuration);
+      if (castleRookStartPos) {
+        pieceEffects.spawnPathRibbon(castleRookStartPos, castleRookEndPos, pathTraceHex, stdMoveDuration);
+      }
 
       if (!isCapture) {
         cameraTelemetry.lastSpaceMoveDuration = stdMoveDuration;
@@ -6791,6 +6879,8 @@ export function initWizardChess() {
         }
 
         lastMoveSquares = { fromR, fromC, toR, toC };
+        pieceEffects.spawnLanding(endPos, piece.type);
+        if (isCastling && castleRook) pieceEffects.spawnLanding(castleRookEndPos, 'rook');
 
         if (isCapture) {
           if (piece.color === 'w') capturedByWhite += 1;
@@ -7138,6 +7228,12 @@ export function initWizardChess() {
               spawnSignatureCombatVFX(piece.type, 'finisher', piece.mesh.position, endPos, dirX, dirZ, piece.color);
               if (captured && captured.mesh) {
                 const shatterOrigin = captured.mesh.position.clone();
+                pieceEffects.spawnShatterChunks(captured.mesh, {
+                  height: (PIECE_HEIGHTS[captured.type] || 0.4) * (ROLE_SCALE_MULTIPLIERS[captured.type] || 1),
+                  type: captured.type,
+                  dirX,
+                  dirZ
+                });
                 removePieceFromScene(captured);
                 spawnStoneShatter(shatterOrigin, captured.color, piece.type, dirX, dirZ);
               }
@@ -8379,6 +8475,7 @@ export function initWizardChess() {
           (!scriptedGameActive && gameMode === 'single' && !isPassAndPlay && aiAutoPlay && currentTurn === aiColor);
         if (inCheck) {
           wizardAudio.playCheckWarning();
+          triggerCheckAlarm();
           if (turnText) {
             turnText.textContent =
               gameVariant === 'xiangqi' ? `${turnLabel} (Chiếu Tướng!)` : `${turnLabel} (Check!)`;
@@ -10754,6 +10851,20 @@ export function initWizardChess() {
       if (impactFlashLight.intensity > 0) {
         impactFlashLight.intensity = Math.max(0, impactFlashLight.intensity - dt * 28);
       }
+      pieceEffects.update(dt);
+      if (checkFlinch) {
+        const { piece: king } = checkFlinch;
+        checkFlinch.t += dt / CHECK_FLINCH_DURATION;
+        if (checkFlinch.t >= 1 || isAnimatingMove || !king.mesh || !king.mesh.parent) {
+          if (king.mesh && !isAnimatingMove) applyPieceBaseScale(king.mesh, king.type);
+          checkFlinch = null;
+        } else {
+          // Two quick, decaying dips: the king shrinks back from the threat and recovers.
+          const dip = Math.abs(Math.sin(checkFlinch.t * Math.PI * 2)) * (1 - checkFlinch.t) * 0.12;
+          applyPieceBaseScale(king.mesh, king.type, 1 + dip * 0.5, 1 - dip);
+        }
+      }
+      if (brazierFlare > 0) brazierFlare = Math.max(0, brazierFlare - dt * 2);
 
       if (shatterDebris.length > 0) {
         const pieceCoords = [];
@@ -10847,20 +10958,21 @@ export function initWizardChess() {
         const baseOp = sp.userData.baseOpacity || 0.4;
         const seed = sp.userData.seed || 0;
         sp.material.opacity =
-          baseOp +
+          baseOp * (1 + brazierFlare * 0.8) +
           Math.sin(elapsedTotal * 5.2 + seed) * 0.045 +
           Math.cos(elapsedTotal * 8.4 + seed * 1.3) * 0.025;
       }
       for (let i = 0; i < brazierLights.length; i++) {
         const baseInt = brazierLights[i].userData.baseIntensity || 3.2;
         brazierLights[i].intensity =
-          baseInt +
+          baseInt * (1 + brazierFlare * 0.9) +
           Math.sin(elapsedTotal * 5.6 + i * 1.7) * 0.28 +
           Math.cos(elapsedTotal * 9.1 + i) * 0.16;
       }
 
       if (activeCheckRingMesh && activeCheckRingMesh.material) {
         activeCheckRingMesh.material.opacity = 0.65 + Math.sin(elapsedTotal * 5.0) * 0.25;
+        sharedCheckLineMat.opacity = motionLevel === 'off' ? 0.5 : 0.42 + Math.sin(elapsedTotal * 5.0) * 0.16;
       }
 
       // Levitate & rotate the 4 Corner Sentinel Relic Crystals on the Sanctum Battle Dais

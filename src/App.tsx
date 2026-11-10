@@ -131,6 +131,7 @@ export default function App() {
 
   return (
     <>
+      <div id="check-vignette" aria-hidden="true" />
       <div id="loading-overlay">
         <div className="loader-title">Wizard Chess</div>
         <div className="loader-bar-wrap">

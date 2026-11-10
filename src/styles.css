@@ -1868,3 +1868,23 @@ body.cinematic-ui-hidden .feedback-corner-fab {
 
 
 
+
+/* A red pulse at the screen edge when a check lands. It never covers the board itself. */
+#check-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 5;
+  background: radial-gradient(ellipse at center, rgba(255, 42, 56, 0) 62%, rgba(255, 42, 56, 0.32) 100%);
+}
+
+#check-vignette.active {
+  animation: check-vignette-pulse 0.9s ease-out 1;
+}
+
+@keyframes check-vignette-pulse {
+  0% { opacity: 0; }
+  18% { opacity: 1; }
+  100% { opacity: 0; }
+}
