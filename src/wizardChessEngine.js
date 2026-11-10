@@ -1459,6 +1459,46 @@ export function initWizardChess() {
       }
     };
 
+    // Sculpted base pieces carry a baked normal + AO map per piece type. The shared team materials have no
+    // textures, so a mesh with maps gets a mirror of its team material that adds them.
+    const BASE_PIECE_DETAIL_MAPS = {
+      pawn: { normal: './assets/glb/detail/pawn_normal.webp', ao: './assets/glb/detail/pawn_ao.webp' },
+      knight: { normal: './assets/glb/detail/knight_normal.webp', ao: './assets/glb/detail/knight_ao.webp' },
+      rook: { normal: './assets/glb/detail/rook_normal.webp', ao: './assets/glb/detail/rook_ao.webp' },
+      bishop: { normal: './assets/glb/detail/bishop_normal.webp', ao: './assets/glb/detail/bishop_ao.webp' },
+      queen: { normal: './assets/glb/detail/queen_normal.webp', ao: './assets/glb/detail/queen_ao.webp' },
+      king: { normal: './assets/glb/detail/king_normal.webp', ao: './assets/glb/detail/king_ao.webp' }
+    };
+    const bodyDetailByGeometry = new WeakMap();
+    const bodyDetailMaterials = [];
+
+    function resolveBodyMaterial(sourceMat, mesh) {
+      const detail = mesh && mesh.geometry ? bodyDetailByGeometry.get(mesh.geometry) : null;
+      if (!detail) return sourceMat;
+      let mat = detail.mats.get(sourceMat);
+      if (!mat) {
+        mat = sourceMat.clone();
+        mat.normalMap = detail.normalMap;
+        mat.aoMap = detail.aoMap;
+        // The meshes have no tangents and the maps use glTF UVs (flipY = false): same sign fix as GLTFLoader.
+        mat.normalScale.set(1, -1);
+        mat.needsUpdate = true;
+        detail.mats.set(sourceMat, mat);
+        bodyDetailMaterials.push({ mat, source: sourceMat });
+      }
+      return mat;
+    }
+
+    function syncBodyDetailMaterials() {
+      for (const { mat, source } of bodyDetailMaterials) {
+        mat.color.copy(source.color);
+        mat.roughness = source.roughness;
+        mat.metalness = source.metalness;
+        mat.emissive.copy(source.emissive);
+        mat.emissiveIntensity = source.emissiveIntensity;
+      }
+    }
+
     const PIECE_THEMES = {
       hogwarts: {
         id: 'hogwarts',
@@ -2027,7 +2067,7 @@ export function initWizardChess() {
           child.userData?.isSteedMesh || nm.endsWith('_Steed') || mName.includes('KnightSteedCoat')
         );
         if (isSteed) {
-          child.material = bank.steed;
+          child.material = resolveBodyMaterial(bank.steed, child);
           child.castShadow = true;
           child.receiveShadow = true;
         } else if (mName.includes('Glow')) {
@@ -2063,7 +2103,7 @@ export function initWizardChess() {
           child.castShadow = true;
           child.receiveShadow = false;
         } else {
-          child.material = bank.primary;
+          child.material = resolveBodyMaterial(bank.primary, child);
           child.castShadow = true;
           child.receiveShadow = true;
         }
@@ -2386,6 +2426,7 @@ export function initWizardChess() {
         );
       }
 
+      syncBodyDetailMaterials();
       updateSanctumAltarTheme(theme);
 
       // Refresh 3D bone-socketed kitbash accessories on all active pieces on the board
@@ -3732,7 +3773,7 @@ export function initWizardChess() {
       return setFloorStoneLook(0);
     }
 
-    const ASSET_CACHE_VER = 'v=meshopt_v1';
+    const ASSET_CACHE_VER = 'v=statue_pilot_v4';
 
     // Cloudflare does not compress .glb, so models ship as .glb.gz and are inflated here.
     async function fetchGlbModel(baseName) {
@@ -4305,6 +4346,31 @@ export function initWizardChess() {
         try {
           const gltf = await loadGltfModel(`${type}_white`);
           const tpl = preparePieceTemplateFromGltf(gltf);
+          const detailPaths = BASE_PIECE_DETAIL_MAPS[type];
+          if (detailPaths) {
+            try {
+              const texLoader = new THREE.TextureLoader();
+              const [normalMap, aoMap] = await Promise.all([
+                texLoader.loadAsync(`${detailPaths.normal}?${ASSET_CACHE_VER}`),
+                texLoader.loadAsync(`${detailPaths.ao}?${ASSET_CACHE_VER}`)
+              ]);
+              for (const tex of [normalMap, aoMap]) {
+                tex.flipY = false; // glTF UV convention
+                tex.colorSpace = THREE.NoColorSpace;
+                tex.anisotropy = 4;
+                tex.needsUpdate = true;
+              }
+              const detail = { normalMap, aoMap, mats: new Map() };
+              tpl.scene.traverse((child) => {
+                if (!child.isMesh || !child.geometry) return;
+                const mName = child.userData?.origMatName || child.material?.name || '';
+                if (/Gold|Trim|Bronze|Glow|Steel/i.test(mName) && !child.userData?.isSteedMesh) return;
+                bodyDetailByGeometry.set(child.geometry, detail);
+              });
+            } catch (err) {
+              console.warn(`Detail maps for ${type} failed to load:`, err);
+            }
+          }
           pieceTemplates[`hogwarts__${type}`] = tpl;
           pieceTemplates[`${type}_w`] = tpl;
           pieceTemplates[`${type}_b`] = tpl;
@@ -4571,7 +4637,7 @@ export function initWizardChess() {
               child.castShadow = true;
               child.receiveShadow = false;
             } else {
-              child.material = primaryMat;
+              child.material = resolveBodyMaterial(primaryMat, child);
               child.castShadow = true;
               child.receiveShadow = true;
             }
