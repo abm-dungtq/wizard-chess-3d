@@ -1478,6 +1478,33 @@ export function initWizardChess() {
     const bodyDetailByGeometry = new WeakMap();
     const bodyDetailMaterials = [];
 
+    // Loads a template's normal + AO maps and registers them for its body (and steed) geometries.
+    async function attachBodyDetailMaps(tpl, detailPaths, label) {
+      if (!detailPaths) return;
+      try {
+        const texLoader = new THREE.TextureLoader();
+        const [normalMap, aoMap] = await Promise.all([
+          texLoader.loadAsync(`${detailPaths.normal}?${ASSET_CACHE_VER}`),
+          texLoader.loadAsync(`${detailPaths.ao}?${ASSET_CACHE_VER}`)
+        ]);
+        for (const tex of [normalMap, aoMap]) {
+          tex.flipY = false; // glTF UV convention
+          tex.colorSpace = THREE.NoColorSpace;
+          tex.anisotropy = 4;
+          tex.needsUpdate = true;
+        }
+        const detail = { normalMap, aoMap, mats: new Map() };
+        tpl.scene.traverse((child) => {
+          if (!child.isMesh || !child.geometry) return;
+          const mName = child.userData?.origMatName || child.material?.name || '';
+          if (/Gold|Trim|Bronze|Glow|Steel/i.test(mName) && !child.userData?.isSteedMesh) return;
+          bodyDetailByGeometry.set(child.geometry, detail);
+        });
+      } catch (err) {
+        console.warn(`Detail maps for ${label} failed to load:`, err);
+      }
+    }
+
     function resolveBodyMaterial(sourceMat, mesh) {
       const detail = mesh && mesh.geometry ? bodyDetailByGeometry.get(mesh.geometry) : null;
       if (!detail) return sourceMat;
@@ -1713,7 +1740,10 @@ export function initWizardChess() {
       if (type !== 'king' && type !== 'queen' && type !== 'bishop' && type !== 'elephant' && type !== 'advisor') {
         return;
       }
-      // The sculpted base statues carry their own crown, coronet and mitre; floating regalia only hides them.
+      // The sculpted base statues carry their own crown, coronet and mitre, and the xiangqi figures their own
+      // plume, hat, tusks and howdah; floating regalia only hides them.
+      const isXiangqiFigure = pieceObj.loadedSetId === 'xiangqi';
+      if (isXiangqiFigure && type !== 'king') return;
       if (pieceObj.loadedSetId === 'hogwarts' && (type === 'king' || type === 'queen' || type === 'bishop')) {
         return;
       }
@@ -1738,10 +1768,13 @@ export function initWizardChess() {
       if (type === 'king') {
         // Sovereign Double Pedestal Ring + Towering Imperial Sun-Cross Spire (y = 1.60..1.96)
         addPart(ROLE_REGALIA_SHARED_GEOS.kingOuterRing, bank.trim, 0, 0, 0);
-        addPart(ROLE_REGALIA_SHARED_GEOS.kingSpireShaft, bank.trim, 0, 1.72, 0);
-        addPart(ROLE_REGALIA_SHARED_GEOS.kingCrossBar, bank.trim, 0, 1.78, 0);
-        addPart(ROLE_REGALIA_SHARED_GEOS.kingSunHalo, bank.trim, 0, 1.72, 0);
-        addPart(ROLE_REGALIA_SHARED_GEOS.kingCrownOrb, bank.accent, 0, 1.92, 0);
+        // The xiangqi general keeps only the ground ring, which marks it on the 9x10 board.
+        if (!isXiangqiFigure) {
+          addPart(ROLE_REGALIA_SHARED_GEOS.kingSpireShaft, bank.trim, 0, 1.72, 0);
+          addPart(ROLE_REGALIA_SHARED_GEOS.kingCrossBar, bank.trim, 0, 1.78, 0);
+          addPart(ROLE_REGALIA_SHARED_GEOS.kingSunHalo, bank.trim, 0, 1.72, 0);
+          addPart(ROLE_REGALIA_SHARED_GEOS.kingCrownOrb, bank.accent, 0, 1.92, 0);
+        }
       } else if (type === 'queen') {
         // Empress Phoenix Rose Diadem + Amethyst/Ruby Waist Sash & Floating Crown Pearl
         addPart(ROLE_REGALIA_SHARED_GEOS.queenWaistSash, bank.queenAccent, 0, 0.72, 0);
@@ -1826,29 +1859,19 @@ export function initWizardChess() {
         } else if (mName.includes('Glow')) {
           if (pieceObj.type === 'queen') {
             child.material = bank.queenAccent;
-          } else if (pieceObj.type === 'bishop' || pieceObj.type === 'elephant') {
+          } else if (pieceObj.type === 'bishop') {
             child.material = bank.bishopAccent;
-          } else if (pieceObj.type === 'advisor') {
-            child.material = bank.steel;
           } else {
             child.material = bank.accent;
           }
           child.castShadow = false;
           child.receiveShadow = false;
         } else if (mName.includes('Gold') || mName.includes('Trim') || mName.includes('Bronze')) {
-          if (pieceObj.type === 'advisor' && gameVariant === 'xiangqi') {
-            child.material = bank.steel;
-          } else if (pieceObj.type === 'elephant' && gameVariant === 'xiangqi') {
-            child.material = bank.bishopAccent;
-          } else {
-            child.material = bank.trim;
-          }
+          child.material = bank.trim;
           child.castShadow = false;
           child.receiveShadow = false;
         } else if (mName.includes('Steel')) {
           if (pieceObj.type === 'queen') {
-            child.material = bank.queenAccent;
-          } else if (pieceObj.type === 'advisor' && gameVariant === 'xiangqi') {
             child.material = bank.queenAccent;
           } else {
             child.material = bank.steel;
@@ -2005,21 +2028,22 @@ export function initWizardChess() {
       }
     }
 
+    // Each side stays in one colour family: cinnabar lacquer against black lacquer, both with bronze trim, dark iron and jade.
     const XIANGQI_DEFAULT_FACTION_MATERIALS = {
-      redPrimary: { color: 0xc81e1e, roughness: 0.19, metalness: 0.28, emissive: 0x7f1d1d, emissiveIntensity: 0.30 },
-      redTrim: { color: 0xfbbf24, roughness: 0.16, metalness: 0.94, emissive: 0xd97706, emissiveIntensity: 0.40 },
-      redSteel: { color: 0xfde68a, roughness: 0.18, metalness: 0.90, emissive: 0xb45309, emissiveIntensity: 0.28 },
-      redAccent: { color: 0xff4d4f, roughness: 0.12, metalness: 0.55, emissive: 0xff3b30, emissiveIntensity: 0.92 },
-      redSteed: { color: 0xf8fafc, roughness: 0.18, metalness: 0.22, emissive: 0x334155, emissiveIntensity: 0.26 },
-      redQueenAccent: { color: 0xc026d3, roughness: 0.16, metalness: 0.68, emissive: 0x86198f, emissiveIntensity: 0.58 },
-      redBishopAccent: { color: 0x10b981, roughness: 0.16, metalness: 0.65, emissive: 0x059669, emissiveIntensity: 0.52 },
-      blackPrimary: { color: 0x111827, roughness: 0.17, metalness: 0.56, emissive: 0x0f172a, emissiveIntensity: 0.26 },
-      blackTrim: { color: 0xd97706, roughness: 0.18, metalness: 0.92, emissive: 0x92400e, emissiveIntensity: 0.34 },
-      blackSteel: { color: 0x94a3b8, roughness: 0.20, metalness: 0.88, emissive: 0x1e293b, emissiveIntensity: 0.24 },
-      blackAccent: { color: 0x38bdf8, roughness: 0.12, metalness: 0.55, emissive: 0x0284c7, emissiveIntensity: 0.88 },
-      blackSteed: { color: 0xd97706, roughness: 0.20, metalness: 0.52, emissive: 0x78350f, emissiveIntensity: 0.34 },
-      blackQueenAccent: { color: 0xf43f5e, roughness: 0.16, metalness: 0.68, emissive: 0xbe123c, emissiveIntensity: 0.62 },
-      blackBishopAccent: { color: 0x06b6d4, roughness: 0.16, metalness: 0.65, emissive: 0x0891b2, emissiveIntensity: 0.52 }
+      redPrimary: { color: 0xa3241c, roughness: 0.42, metalness: 0.08, emissive: 0x3a0906, emissiveIntensity: 0.18 },
+      redTrim: { color: 0xc79a4a, roughness: 0.39, metalness: 0.6, emissive: 0x5a3a0c, emissiveIntensity: 0.12 },
+      redSteel: { color: 0x4a4744, roughness: 0.45, metalness: 0.7, emissive: 0x000000, emissiveIntensity: 0.0 },
+      redAccent: { color: 0x2fbf8f, roughness: 0.2, metalness: 0.3, emissive: 0x0f8f66, emissiveIntensity: 0.55 },
+      redSteed: { color: 0x8a2018, roughness: 0.45, metalness: 0.08, emissive: 0x2e0704, emissiveIntensity: 0.16 },
+      redQueenAccent: { color: 0xb8432f, roughness: 0.4, metalness: 0.1, emissive: 0x3a0906, emissiveIntensity: 0.16 },
+      redBishopAccent: { color: 0x93261f, roughness: 0.42, metalness: 0.1, emissive: 0x2e0704, emissiveIntensity: 0.16 },
+      blackPrimary: { color: 0x16171c, roughness: 0.4, metalness: 0.2, emissive: 0x05060a, emissiveIntensity: 0.2 },
+      blackTrim: { color: 0xb08a45, roughness: 0.39, metalness: 0.6, emissive: 0x4a300a, emissiveIntensity: 0.1 },
+      blackSteel: { color: 0x5a6068, roughness: 0.42, metalness: 0.75, emissive: 0x000000, emissiveIntensity: 0.0 },
+      blackAccent: { color: 0x49c7b0, roughness: 0.2, metalness: 0.3, emissive: 0x128a78, emissiveIntensity: 0.55 },
+      blackSteed: { color: 0x1f2229, roughness: 0.42, metalness: 0.2, emissive: 0x05060a, emissiveIntensity: 0.2 },
+      blackQueenAccent: { color: 0x23252d, roughness: 0.4, metalness: 0.2, emissive: 0x05060a, emissiveIntensity: 0.2 },
+      blackBishopAccent: { color: 0x1b1d24, roughness: 0.4, metalness: 0.2, emissive: 0x05060a, emissiveIntensity: 0.2 }
     };
 
     const CHESS_DEFAULT_ROLE_MATERIALS = {
@@ -2099,12 +2123,12 @@ export function initWizardChess() {
 
       if (typeof sharedWhitePedestalRingMat !== 'undefined' && sharedWhitePedestalRingMat) {
         sharedWhitePedestalRingMat.color.setHex(
-          typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' ? 0xff4d4f : 0xf4efe4
+          typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' ? 0xd9382e : 0xf4efe4
         );
       }
       if (typeof sharedBlackPedestalRingMat !== 'undefined' && sharedBlackPedestalRingMat) {
         sharedBlackPedestalRingMat.color.setHex(
-          typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' ? 0x38bdf8 : 0x0b0d12
+          typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' ? 0x49c7b0 : 0x0b0d12
         );
       }
 
@@ -3459,7 +3483,7 @@ export function initWizardChess() {
       return setFloorStoneLook(0);
     }
 
-    const ASSET_CACHE_VER = 'v=statue_pilot_v4';
+    const ASSET_CACHE_VER = 'v=statue_pilot_v5';
 
     // Cloudflare does not compress .glb, so models ship as .glb.gz and are inflated here.
     async function fetchGlbModel(baseName) {
@@ -3744,7 +3768,16 @@ export function initWizardChess() {
             XIANGQI_PIECE_TYPES.map(async (type) => {
               if (pieceTemplates[`xiangqi__${type}`]) return;
               const gltf = await loadGltfModel(`xiangqi/${type}_white`);
-              pieceTemplates[`xiangqi__${type}`] = preparePieceTemplateFromGltf(gltf);
+              const tpl = preparePieceTemplateFromGltf(gltf);
+              await attachBodyDetailMaps(
+                tpl,
+                {
+                  normal: `./assets/glb/detail/xiangqi/${type}_normal.webp`,
+                  ao: `./assets/glb/detail/xiangqi/${type}_ao.webp`
+                },
+                `xiangqi ${type}`
+              );
+              pieceTemplates[`xiangqi__${type}`] = tpl;
             })
           );
           if (gameVariant === 'xiangqi' && typeof boardState !== 'undefined' && Array.isArray(boardState)) {
@@ -4032,31 +4065,7 @@ export function initWizardChess() {
         try {
           const gltf = await loadGltfModel(`${type}_white`);
           const tpl = preparePieceTemplateFromGltf(gltf);
-          const detailPaths = BASE_PIECE_DETAIL_MAPS[type];
-          if (detailPaths) {
-            try {
-              const texLoader = new THREE.TextureLoader();
-              const [normalMap, aoMap] = await Promise.all([
-                texLoader.loadAsync(`${detailPaths.normal}?${ASSET_CACHE_VER}`),
-                texLoader.loadAsync(`${detailPaths.ao}?${ASSET_CACHE_VER}`)
-              ]);
-              for (const tex of [normalMap, aoMap]) {
-                tex.flipY = false; // glTF UV convention
-                tex.colorSpace = THREE.NoColorSpace;
-                tex.anisotropy = 4;
-                tex.needsUpdate = true;
-              }
-              const detail = { normalMap, aoMap, mats: new Map() };
-              tpl.scene.traverse((child) => {
-                if (!child.isMesh || !child.geometry) return;
-                const mName = child.userData?.origMatName || child.material?.name || '';
-                if (/Gold|Trim|Bronze|Glow|Steel/i.test(mName) && !child.userData?.isSteedMesh) return;
-                bodyDetailByGeometry.set(child.geometry, detail);
-              });
-            } catch (err) {
-              console.warn(`Detail maps for ${type} failed to load:`, err);
-            }
-          }
+          await attachBodyDetailMaps(tpl, BASE_PIECE_DETAIL_MAPS[type], type);
           pieceTemplates[`hogwarts__${type}`] = tpl;
           pieceTemplates[`${type}_w`] = tpl;
           pieceTemplates[`${type}_b`] = tpl;

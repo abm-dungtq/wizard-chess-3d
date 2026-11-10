@@ -27,18 +27,38 @@ User decisions on 2026-11-10: (1) entirely new figures, made the way the chess s
 
 - The seven xiangqi models reuse the chess armatures: king (king rig), advisor (queen rig), elephant and cannon (bishop rig), rook (rook rig), knight (knight rig), pawn (pawn rig). `build_generated.py` in `.tools/piece-redesign/` therefore applies unchanged.
 - The effect layer (`src/pieceEffects.js`) already runs in xiangqi: ribbon, landing, shatter chunks, check line and ring, king flinch.
-- Tooling on 2026-11-10: G-Labs webhook answers; Blender MCP is connected (Blender 5.2.3) with every generator switched off; the Hyper3D MCP server needs to be authorised again by the user.
+- Tooling on 2026-11-10: G-Labs webhook answers; Blender MCP is connected (Blender 5.2.3) with every generator switched off; the Hyper3D MCP server is authorised only in the user's interactive session, not in headless runs.
 
 ## Phases
 
 | # | Phase | Status |
 |---|-------|--------|
-| 1 | Concept sheet, silhouette strip, one reference image per piece | Done, waiting for the user's approval |
+| 1 | Concept sheet, silhouette strip, one reference image per piece | Done, approved by the user on 2026-11-10 |
 | 2 | Wooden board | First pass done (`visuals/wood-board-first-pass.jpg`) |
-| 3 | Mesh generation, 7 generations | Blocked: Hyper3D authorisation and approval to spend credits |
-| 4 | Blender build, rig, export, detail maps | Not started |
-| 5 | Side colours and readability on the wood, measured | Not started; `e2e/board-readability.spec.ts` samples 8x8 squares and needs a xiangqi mode |
-| 6 | In-game check of move, capture, shatter and check per piece | Not started |
+| 3 | Mesh generation, 7 generations | Done: 7 generations used, none spare, none failed (Hyper3D Rodin, run from the user's interactive session) |
+| 4 | Blender build, rig, export, detail maps | Done: seven GLBs (222 to 325 KB), normal and AO maps under `public/assets/glb/detail/xiangqi/`, cache key `v=statue_pilot_v5` |
+| 5 | Side colours and readability on the wood, measured | Palette applied to the new figures (`visuals/new-figures-red-side.jpg`, `visuals/new-figures-black-side.jpg`); not measured: `e2e/board-readability.spec.ts` samples 8x8 squares and needs a xiangqi mode |
+| 6 | In-game check of move, capture, shatter and check per piece | Partly: start position from both seats, cannon capture, chariot capture and a horse move checked (`XQ=1 XQ_OUT=<dir> npx playwright test e2e/xiangqi-shots.spec.ts`). Not yet looked at: captures by soldier, advisor, elephant, horse and general, and a check |
+
+## Build record (2026-11-10)
+
+Scripts are the chess ones in `.tools/piece-redesign/` run with `WS_ROOT` set to `.tools/xiangqi-redesign/` (both ignored by git). `build_generated.py` gained `MAX_HALF_W`, which caps the half width so a vehicle or animal is scaled by width instead of height; it is 0.47 for chariot, cannon and elephant and 0.52 for the horseman.
+
+| Piece | Rig | Spine knots (z, bone) | Idle | Move | Attack |
+|-------|-----|-----------------------|------|------|--------|
+| Soldier | pawn | 0.34 to 0.42 Pelvis, 0.62 to 0.70 Torso, 0.86 Head | 1.21 / 0.82 | 1.41 / 0.73 | 1.57 / 0.55 |
+| Advisor | queen | 0.35 Skirt_Lower, 0.85 to 1.15 Torso, 1.35 Head_Crown | 1.10 / 0.89 | 1.11 / 0.87 | 1.28 / 0.74 |
+| General | king | 0.35 Robe_Lower, 0.85 to 1.12 Torso, 1.32 Head_Crown | 1.03 / 0.96 | 1.10 / 0.92 | 1.15 / 0.89 |
+| Chariot | rook | 0.25 Tower_Lower, 0.52 to 0.70 Tower_Upper, 0.98 Battlement_Crown | 1.19 / 0.84 | 1.16 / 0.85 | 1.35 / 0.71 |
+| Cannon | bishop | 0.12 Robe_Lower, 0.85 to 1.2 Torso | 1.07 / 0.93 | 1.14 / 0.86 | 1.33 / 0.73 |
+| Elephant | bishop | 0.14 Robe_Lower, 0.85 to 1.05 Torso, 1.38 Head_Mitre | 1.23 / 0.83 | 1.14 / 0.86 | 1.34 / 0.69 |
+| Horseman | knight | `.tools/xiangqi-redesign/knight_weights.py`, 120 smoothing rounds | 1.24 / 0.75 | 1.83 / 0.28 | 2.65 / 0.08 |
+
+Each cell is the largest and smallest edge length ratio against the rest pose; the limit is 1.6 / 0.5. The horseman is outside it on 10 of 24,356 edges in Move and 158 in Attack, all short edges where the rider's hands meet the mane; the chess knight has the same limit breach (132 edges) and, like it, shows no tear in the game frames.
+
+Engine changes with the new figures: no floating regalia on xiangqi pieces (sun halo, loose tusks, collar ring; the general keeps its gold ground ring, by user decision), the advisor and elephant use the same bronze trim and jade gem as the rest of their side, and `attachBodyDetailMaps` loads the detail maps for both games.
+
+Known flaws of the generated meshes, kept because no spare generation was approved: the cannon carriage came out with one wheel in front under the muzzle and two behind; the general's plume takes the body colour.
 
 ## Design brief
 
