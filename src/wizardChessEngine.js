@@ -103,7 +103,7 @@ export function initWizardChess() {
       },
       xiangqi: {
         pawn:     { sx: 0.94, sy: 0.94, sz: 0.94 },
-        cannon:   { sx: 1.04, sy: 0.98, sz: 1.06 },
+        cannon:   { sx: 1.30, sy: 1.30, sz: 1.30 }, // a low field gun with a long trail: enlarged to stand with the others
         knight:   { sx: 1.04, sy: 1.02, sz: 1.08 },
         elephant: { sx: 1.14, sy: 0.96, sz: 1.14 },
         advisor:  { sx: 0.84, sy: 0.90, sz: 0.84 },
@@ -3483,7 +3483,7 @@ export function initWizardChess() {
       return setFloorStoneLook(0);
     }
 
-    const ASSET_CACHE_VER = 'v=statue_pilot_v5';
+    const ASSET_CACHE_VER = 'v=statue_pilot_v6';
 
     // Cloudflare does not compress .glb, so models ship as .glb.gz and are inflated here.
     async function fetchGlbModel(baseName) {
