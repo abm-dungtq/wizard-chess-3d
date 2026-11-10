@@ -105,21 +105,6 @@ test('All compressed 3D assets (.glb.gz) gunzip to valid glTF 2.0 binary models'
     'king_white'
   ];
 
-  const themedSetIds = [
-    'dong_son',
-    'shogun_yokai',
-    'valhalla_valkyrie',
-    'pharaoh_anubis',
-    'mecha_ronin',
-    'abyssal_lich',
-    'bauhaus_imperial'
-  ];
-  const pieceNames = ['pawn_white', 'rook_white', 'knight_white', 'bishop_white', 'queen_white', 'king_white'];
-  for (const sid of themedSetIds) {
-    for (const pName of pieceNames) {
-      expectedModels.push(`sets/${sid}/${pName}`);
-    }
-  }
 
   for (const name of expectedModels) {
     const gzPath = path.join(ROOT, 'public/assets/glb', `${name}.glb.gz`);
@@ -954,26 +939,12 @@ test('Online 2-Player Room API (/api/rooms/*), Worker & Duel Room Modal Safeguar
     engineJs.includes('const BOARD_SQ_SIZE = 0.44;') &&
       engineJs.includes('const PIECE_SCALE_FACTOR = 0.66;') &&
       engineJs.includes('function buildSanctumArenaAltar()') &&
-      engineJs.includes('function attachSkinKitbashToPiece(pieceObj)') &&
-      appTsx.includes('id="skin-shop-overlay"') &&
-      appTsx.includes('id="btn-skin-shop"'),
-    'Grand Sanctum Arena Altar, expanded 0.44m board square size (3.52m board), spacious 0.66 piece scale factor, and 3D Skin Boutique (#skin-shop-overlay) must be wired'
+      engineJs.includes('function attachSkinKitbashToPiece(pieceObj)'),
+    'Grand Sanctum Arena Altar, expanded 0.44m board square size (3.52m board) and spacious 0.66 piece scale factor must be wired'
   );
-  for (const skinKey of [
-    'hogwarts',
-    'dong_son',
-    'shogun_yokai',
-    'abyssal_lich',
-    'mecha_ronin',
-    'valhalla_valkyrie',
-    'pharaoh_anubis',
-    'bauhaus_imperial'
-  ]) {
-    assert.ok(
-      engineJs.includes(`${skinKey}: {`) && appTsx.includes(`data-skin-id="${skinKey}"`),
-      `Multi-style 3D skin set "${skinKey}" must be registered in PIECE_THEMES and rendered in #skin-shop-overlay`
-    );
-  }
+  // One default set ships; the recolour themes, the paid sets and the skin shop are gone.
+  assert.ok(engineJs.includes("const PIECE_THEME_ORDER = ['hogwarts'];"), 'hogwarts must be the only registered piece theme');
+  assert.ok(!appTsx.includes('skin-shop-overlay') && !appTsx.includes('data-skin-id'), 'the skin shop must not be rendered');
 
   // 2. End-to-end /api/rooms/* lifecycle & error branches via handleRoomApiRequest
   const nonRoomRes = await handleRoomApiRequest(new Request('http://localhost/health'), store);
@@ -1344,8 +1315,7 @@ test('Mobile Gameplay Optimization Contract: Portrait Frustum-Fit Camera, Anti-O
     'btn-quick-cam',
     'btn-quick-lock',
     'btn-quick-undo',
-    'btn-quick-duel',
-    'btn-quick-skin'
+    'btn-quick-duel'
   ]) {
     assert.ok(
       appTsx.includes(`id="${dockId}"`) && engineJs.includes(dockId),
@@ -1416,27 +1386,17 @@ test('Mobile Anti-OOM & Zero-Leak GPU/WebAudio Contract (Shared Highlight/Tactic
   );
 });
 
-test('Outer Sanctum Amphitheater & 8 Theme-Reactive Guardian Monument Archetypes Contract', () => {
+test('Outer Sanctum Amphitheater & Guardian Monument Contract', () => {
   const engineJs = fs.readFileSync(path.join(ROOT, 'src/wizardChessEngine.js'), 'utf-8');
 
   assert.ok(
     engineJs.includes('function buildSanctumOuterArena(') &&
-      engineJs.includes('function resolveOuterMonumentArchetype(themeId)') &&
       engineJs.includes('BRAZIER_FLAME_PALETTES') &&
       engineJs.includes('sanctumPerimeterMotesUniforms'),
     'Engine must build the outer Sanctum amphitheater, sunken moat, GPU perimeter motes, and theme-synced brazier palettes'
   );
 
-  for (const archetype of [
-    'hogwarts',
-    'dong_son',
-    'shogun_yokai',
-    'mecha_ronin',
-    'abyssal_lich',
-    'valhalla_valkyrie',
-    'pharaoh_anubis',
-    'bauhaus_imperial'
-  ]) {
+  for (const archetype of ['hogwarts']) {
     assert.ok(
       engineJs.includes(`'${archetype}'`) && engineJs.includes(`${archetype}: {`),
       `Outer arena must define monument archetype and brazier flame palette for "${archetype}"`
@@ -2207,7 +2167,7 @@ test('every model asset has a gzipped binary glb', () => {
   const files = walk(root);
   assert.equal(files.filter((f) => f.endsWith('.b64')).length, 0, 'the old .glb.gz.b64 format is gone');
   const models = files.filter((f) => f.endsWith('.glb.gz'));
-  assert.equal(models.length, 56);
+  assert.equal(models.length, 14);
   for (const gz of models) {
     assert.equal(zlib.gunzipSync(fs.readFileSync(gz)).subarray(0, 4).toString('ascii'), 'glTF', path.relative(root, gz));
   }

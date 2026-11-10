@@ -216,16 +216,6 @@ export default function App() {
 
           <button
             type="button"
-            className="hud-btn top-primary-btn skin-shop-trigger desktop-only-top-btn"
-            id="btn-skin-shop"
-            title="Mở Cửa Hàng Bộ Sưu Tập Quân Cờ 3D (8 Phong Cách Độc Bản &amp; Bàn Đấu Thánh Đường)"
-            onClick={() => setMobileSheetOpen(false)}
-          >
-            👑 Skin 3D
-          </button>
-
-          <button
-            type="button"
             className={`hud-btn menu-toggle-trigger ${mobileSheetOpen ? 'active' : ''}`}
             id="btn-mobile-controls"
             aria-expanded={mobileSheetOpen}
@@ -421,13 +411,6 @@ export default function App() {
             🏷️ Tên Quân: Thông Minh
           </button>
           <button
-            className="hud-btn"
-            id="btn-piece-skin"
-            title="Đổi nhanh bộ cờ 3D (Đông Sơn, Shogun, Mecha 2099, Cửu U Lich, Valhalla, Pharaoh, Bauhaus, Cẩm Thạch)"
-          >
-            🎨 Skin: Cẩm Thạch
-          </button>
-          <button
             className="hud-btn active"
             id="btn-cam-spectator"
             title="Góc nhìn 3/4 từ phía người chơi (Bấm lần nữa để lật Trắng / Đen)"
@@ -556,14 +539,6 @@ export default function App() {
           >
             ⚔️ 2 Người
           </button>
-          <button
-            type="button"
-            className="hud-btn mobile-dock-btn skin-shop-trigger"
-            id="btn-quick-skin"
-            title="Mở Cửa Hàng Bộ Sưu Tập Quân Cờ 3D"
-          >
-            👑 Skin 3D
-          </button>
         </div>
       </div>
 
@@ -658,155 +633,6 @@ export default function App() {
           <div className="checkmate-actions" style={{ marginTop: '12px' }}>
             <button type="button" className="checkmate-btn secondary" id="btn-duel-close">
               Đóng / Vào Bàn Cờ
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div id="skin-shop-overlay" role="dialog" aria-modal="true" aria-labelledby="skin-shop-title">
-        <div className="promotion-modal skin-shop-card">
-          <div className="checkmate-ornament">✦ &nbsp; Sanctum Royal Armory &amp; 3D Skin Boutique &nbsp; ✦</div>
-          <div className="promotion-title" id="skin-shop-title">Bộ Sưu Tập Quân Cờ &amp; Đại Điện 3D</div>
-          <div className="skin-shop-subtitle">
-            Chọn bộ cờ để ngắm trực tiếp trên Đại Bàn Cờ 3.52m • Mỗi bộ đi kèm Phụ Kiện Vũ Khí 3D, Màu Đá Bàn Đấu &amp; Hiệu Ứng Nổ Vỡ riêng
-          </div>
-          <div className="checkmate-rule"></div>
-
-          <div className="skin-grid" id="skin-catalog-grid">
-            <button type="button" className="skin-item-card selected" data-skin-id="dong_son">
-              <div className="skin-tier-badge mythic">THẦN THOẠI VIỆT</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#e6c687' }}></span>
-                <span className="skin-swatch" style={{ background: '#12352a' }}></span>
-                <span className="skin-swatch" style={{ background: '#fbbf24' }}></span>
-              </div>
-              <div className="skin-card-name">Hào Khí Đông Sơn</div>
-              <div className="skin-card-desc">Trống Đồng Lạc Việt • Mũ Lông Công &amp; Rìu Chiến</div>
-              <div className="skin-card-status">199.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="shogun_yokai">
-              <div className="skin-tier-badge mythic">THẦN THOẠI</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#f5ebe1' }}></span>
-                <span className="skin-swatch" style={{ background: '#220910' }}></span>
-                <span className="skin-swatch" style={{ background: '#ef4444' }}></span>
-              </div>
-              <div className="skin-card-name">Đại Mạc Phủ Shogun</div>
-              <div className="skin-card-desc">Giáp Sơn Mài • Sừng Kabuto &amp; Cờ Lệnh Samurai</div>
-              <div className="skin-card-status">199.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="mecha_ronin">
-              <div className="skin-tier-badge mythic">CYBER MYTHIC</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#eef4fa' }}></span>
-                <span className="skin-swatch" style={{ background: '#0f172a' }}></span>
-                <span className="skin-swatch" style={{ background: '#00f5d4' }}></span>
-              </div>
-              <div className="skin-card-name">Cyberpunk Mecha 2099</div>
-              <div className="skin-card-desc">Cánh Phản Lực Titanium • Kính Visor &amp; Lõi Neon</div>
-              <div className="skin-card-status">199.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="abyssal_lich">
-              <div className="skin-tier-badge epic">SỬ THI</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#dad4c8' }}></span>
-                <span className="skin-swatch" style={{ background: '#0b0914' }}></span>
-                <span className="skin-swatch" style={{ background: '#10b981' }}></span>
-              </div>
-              <div className="skin-card-name">Cửu U Minh Giới</div>
-              <div className="skin-card-desc">Vương Miện Gai Tử Thần • Lõi Linh Hồn &amp; Lưỡi Hái</div>
-              <div className="skin-card-status">129.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="valhalla_valkyrie">
-              <div className="skin-tier-badge epic">SỬ THI</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#e2ecf5' }}></span>
-                <span className="skin-swatch" style={{ background: '#131c2b' }}></span>
-                <span className="skin-swatch" style={{ background: '#38bdf8' }}></span>
-              </div>
-              <div className="skin-card-name">Thánh Điện Valhalla</div>
-              <div className="skin-card-desc">Cánh Thiên Thần Valkyrie • Búa Thần &amp; Băng Tinh</div>
-              <div className="skin-card-status">129.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="pharaoh_anubis">
-              <div className="skin-tier-badge epic">SỬ THI</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#f5e8c7' }}></span>
-                <span className="skin-swatch" style={{ background: '#141b33' }}></span>
-                <span className="skin-swatch" style={{ background: '#fbbf24' }}></span>
-              </div>
-              <div className="skin-card-name">Vương Triều Pharaoh</div>
-              <div className="skin-card-desc">Đĩa Mặt Trời Thần Ra • Tai Anubis &amp; Kim Tự Tháp</div>
-              <div className="skin-card-status">129.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="bauhaus_imperial">
-              <div className="skin-tier-badge rare">HIẾM</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#f8fafc' }}></span>
-                <span className="skin-swatch" style={{ background: '#111318' }}></span>
-                <span className="skin-swatch" style={{ background: '#e11d48' }}></span>
-              </div>
-              <div className="skin-card-name">Bauhaus Đế Vương</div>
-              <div className="skin-card-desc">Sứ Trắng Minh Triều • Vòng Hào Quang Art Deco</div>
-              <div className="skin-card-status">69.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card equipped" data-skin-id="hogwarts">
-              <div className="skin-tier-badge free">MẶC ĐỊNH</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#f2ece0' }}></span>
-                <span className="skin-swatch" style={{ background: '#181c26' }}></span>
-                <span className="skin-swatch" style={{ background: '#d4af37' }}></span>
-              </div>
-              <div className="skin-card-name">Thánh Đường Cổ Điển</div>
-              <div className="skin-card-desc">Cẩm Thạch Trắng &amp; Hắc Diện Thạch Mạ Vàng</div>
-              <div className="skin-card-status">✓ Đang Trang Bị</div>
-            </button>
-          </div>
-
-          <div className="skin-detail-panel">
-            <div className="skin-detail-info">
-              <div className="skin-detail-title" id="skin-detail-title">Hào Khí Đông Sơn</div>
-              <div className="skin-detail-subtitle" id="skin-detail-subtitle">
-                Trống Đồng Lạc Việt • Mũ Lông Công &amp; Rìu Chiến Cổ Loa
-              </div>
-              <div className="skin-detail-price" id="skin-detail-price">
-                Giá mở khóa: 199.000đ (Kèm bàn cờ &amp; hiệu ứng vỡ 3D riêng)
-              </div>
-            </div>
-            <div className="skin-detail-actions">
-              <button type="button" className="checkmate-btn" id="btn-skin-equip">
-                🔓 Mở Khóa Ngay (199.000đ)
-              </button>
-              <button type="button" className="checkmate-btn secondary" id="btn-skin-trial">
-                ⚡ Dùng Thử 1 Ván
-              </button>
-              <button type="button" className="checkmate-btn secondary" id="btn-skin-shatter">
-                💥 Xem Hiệu Ứng Nổ Vỡ
-              </button>
-            </div>
-          </div>
-
-          <div className="skin-unlock-banner" id="skin-unlock-box">
-            <span>🎁 <strong>Royal Collector Pass:</strong> Mở khóa trọn bộ 8 Phong Cách 3D Độc Bản + Đấu Trường Cổ Ngữ</span>
-            <button type="button" className="checkmate-btn" id="btn-skin-unlock-all">
-              👑 Mở Khóa Tất Cả (VIP Pass)
-            </button>
-          </div>
-
-          <div className="duel-status-msg" id="skin-shop-status-msg">
-            Mẹo: Khi đánh Phòng 2 Người Online, bộ Skin bạn trang bị sẽ hiển thị trực tiếp cho đối thủ chiêm ngưỡng!
-          </div>
-
-          <div className="checkmate-actions" style={{ marginTop: '10px' }}>
-            <button type="button" className="checkmate-btn secondary" id="btn-skin-shop-close">
-              Đóng Cửa Hàng &amp; Vào Trận
             </button>
           </div>
         </div>

@@ -109,34 +109,4 @@ test.describe('transfer size', () => {
     console.log(JSON.stringify({ total, top }));
     expect(total).toBeLessThanOrEqual(10_485_760);
   });
-
-  test('per skin set transfer size', async ({ page }) => {
-    test.setTimeout(300_000);
-    await openGame(page);
-    await waitIdle(page);
-    const sets = ['dong_son', 'shogun_yokai', 'abyssal_lich', 'bauhaus_imperial', 'mecha_ronin', 'pharaoh_anubis', 'valhalla_valkyrie'];
-    const sizes: Record<string, number> = {};
-    for (const setId of sets) {
-      await page.evaluate((id) => (window as any).wizardChess.setPieceTheme(id), setId);
-      await page.waitForFunction(
-        (id) =>
-          performance
-            .getEntriesByType('resource')
-            .filter((e) => e.name.includes(`/assets/glb/sets/${id}/`)).length >= 6,
-        setId,
-        { timeout: 60_000 }
-      );
-      await waitIdle(page);
-      sizes[setId] = await page.evaluate(
-        (id) =>
-          performance
-            .getEntriesByType('resource')
-            .filter((e) => e.name.includes(`/assets/glb/sets/${id}/`))
-            .reduce((n, e) => n + (e as PerformanceResourceTiming).transferSize, 0),
-        setId
-      );
-      console.log(JSON.stringify({ setId, bytes: sizes[setId] }));
-    }
-    for (const bytes of Object.values(sizes)) expect(bytes).toBeLessThanOrEqual(3_670_016);
-  });
 });

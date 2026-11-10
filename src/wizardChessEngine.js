@@ -81,15 +81,15 @@ export function initWizardChess() {
       return gameVariant === 'xiangqi' ? XIANGQI_SQ_SIZE : BOARD_SQ_SIZE;
     }
     const ROLE_SCALE_MULTIPLIERS = {
-      pawn: 0.85,
+      pawn: 0.94,
       advisor: 0.94,
       knight: 0.96,
       cannon: 0.97,
       bishop: 0.98,
       elephant: 1.00,
       rook: 1.02,
-      queen: 1.08,
-      king: 1.15
+      queen: 1.05,
+      king: 1.10
     };
     const ROLE_ANISOTROPIC_RATIOS = {
       chess: {
@@ -354,7 +354,7 @@ export function initWizardChess() {
         postComposer.addPass(bokeh);
         postPasses.bokeh = bokeh;
       }
-      const bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.45, 0.88);
+      const bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.45, 1.0);
       postComposer.addPass(bloom);
       postPasses.bloom = bloom;
       postComposer.addPass(new OutputPass());
@@ -712,11 +712,11 @@ export function initWizardChess() {
     };
 
     // Dramatic Chiaroscuro Cathedral & Board Lighting (restoring original-example 3D stone relief & warm firelight contrast)
-    const hemiLight = new THREE.HemisphereLight(0xd8ccb8, 0x261d14, 0.62);
+    const hemiLight = new THREE.HemisphereLight(0xd8ccb8, 0x261d14, 0.85);
     scene.add(hemiLight);
 
     const keyLight = new THREE.DirectionalLight(0xfff0d6, 2.55);
-    keyLight.position.set(3.8, 8.5, 4.2);
+    keyLight.position.set(5.0, 8.5, 1.5);
     keyLight.castShadow = true;
     const shadowMapRes = isCoarseOrMobile ? 1024 : 2048;
     keyLight.shadow.mapSize.width = shadowMapRes;
@@ -732,18 +732,18 @@ export function initWizardChess() {
     scene.add(keyLight);
 
     // Subtle directional rim/fill (kept low so opposing directional lights never cancel normal-map mortar shadows)
-    const rimLight = new THREE.DirectionalLight(0xd8cbb8, 0.72);
-    rimLight.position.set(-4.5, 6.0, -6.5);
+    const rimLight = new THREE.DirectionalLight(0xd8cbb8, 1.10);
+    rimLight.position.set(0.6, 3.2, -8.5);
     scene.add(rimLight);
 
-    const southFillLight = new THREE.DirectionalLight(0xffe4c0, 0.52);
-    southFillLight.position.set(4.2, 5.8, 7.5);
+    const southFillLight = new THREE.DirectionalLight(0xffe4c0, 1.10);
+    southFillLight.position.set(4.2, 4.4, 7.5);
     scene.add(southFillLight);
 
     // Twin Flickering Brazier Point Lights (centered at x = +/-3.65, z = 0.00; flanking column bounce is evaluated in shader)
     const brazierCoords = [
-      { pos: [-3.65, 1.08, 0.00], baseIntensity: 4.35, dist: 18.0 },
-      { pos: [3.65, 1.08, 0.00], baseIntensity: 4.35, dist: 18.0 }
+      { pos: [-3.65, 1.08, 0.00], baseIntensity: 4.35, dist: 1.4 },
+      { pos: [3.65, 1.08, 0.00], baseIntensity: 4.35, dist: 1.4 }
     ];
     const brazierLights = [];
     for (const cfg of brazierCoords) {
@@ -1357,14 +1357,17 @@ export function initWizardChess() {
 
     // Board and altar gold follows the white trim's colour, but never as polished as piece trim:
     // under bloom, a mirror-like rail reflects the cathedral light as a glare across the board edge.
-    const BOARD_GOLD_MIN_ROUGHNESS = 0.34;
+    const BOARD_GOLD_MIN_ROUGHNESS = 0.39;
+    const BOARD_GOLD_MAX_METALNESS = 0.3;
+    const BOARD_GOLD_VALUE_SHARE = 0.5;
+    const BOARD_GOLD_EMISSIVE_SHARE = 0.15;
     const boardGoldTrimMat = goldTrimMat.clone();
     function syncBoardGoldTrim() {
-      boardGoldTrimMat.color.copy(goldTrimMat.color);
-      boardGoldTrimMat.metalness = goldTrimMat.metalness;
+      boardGoldTrimMat.color.copy(goldTrimMat.color).multiplyScalar(BOARD_GOLD_VALUE_SHARE);
+      boardGoldTrimMat.metalness = Math.min(goldTrimMat.metalness, BOARD_GOLD_MAX_METALNESS);
       boardGoldTrimMat.roughness = Math.max(goldTrimMat.roughness, BOARD_GOLD_MIN_ROUGHNESS);
       boardGoldTrimMat.emissive.copy(goldTrimMat.emissive);
-      boardGoldTrimMat.emissiveIntensity = goldTrimMat.emissiveIntensity;
+      boardGoldTrimMat.emissiveIntensity = goldTrimMat.emissiveIntensity * BOARD_GOLD_EMISSIVE_SHARE;
     }
     syncBoardGoldTrim();
 
@@ -1386,19 +1389,21 @@ export function initWizardChess() {
     });
 
     // Distinct Warhorse Coat Materials (White/Red Knight vs Black Knight) & Role-Specific Royal Regalia Accents
+    // A steed stays inside its side's value band (pale for White, dark for Black) and differs from the rider
+    // by hue only, so a knight never reads as a piece of the other side.
     const whiteSteedMat = new THREE.MeshStandardMaterial({
-      color: 0x9a3412,
-      roughness: 0.24,
-      metalness: 0.24,
-      emissive: 0x451a03,
-      emissiveIntensity: 0.28
+      color: 0xecd8ba,
+      roughness: 0.34,
+      metalness: 0.06,
+      emissive: 0x000000,
+      emissiveIntensity: 0.0
     });
     const blackSteedMat = new THREE.MeshStandardMaterial({
-      color: 0xe2e8f0,
-      roughness: 0.20,
-      metalness: 0.38,
-      emissive: 0x1e293b,
-      emissiveIntensity: 0.28
+      color: 0x2c3850,
+      roughness: 0.40,
+      metalness: 0.18,
+      emissive: 0x0b1220,
+      emissiveIntensity: 0.22
     });
     const whiteQueenAccentMat = new THREE.MeshStandardMaterial({
       color: 0xa855f7,
@@ -1504,284 +1509,27 @@ export function initWizardChess() {
         id: 'hogwarts',
         name: 'Thánh Đường Cổ Điển',
         subtitle: 'Cẩm Thạch Trắng & Hắc Diện Thạch Mạ Vàng',
-        tier: 'free',
-        priceVnd: 0,
-        priceLabel: 'Miễn phí',
-        kitbashStyle: 'none',
         shatterColor: 0xffb74d,
         altarGlowColor: 0xd4af37,
         lightSqHex: 0xe6decb,
         darkSqHex: 0x232a3a,
-        label: '🎨 Skin: Cẩm Thạch',
         white: { color: 0xf2ece0, roughness: 0.30, metalness: 0.06, emissive: 0x000000, emissiveIntensity: 0.0 },
-        black: { color: 0x181c26, roughness: 0.24, metalness: 0.32, emissive: 0x0b0e15, emissiveIntensity: 0.22 },
+        // Charcoal rather than pure black, and mostly diffuse, so the light models the form of a black piece.
+        black: { color: 0x222734, roughness: 0.42, metalness: 0.15, emissive: 0x0b0e15, emissiveIntensity: 0.22 },
         trim: { color: 0xd4af37, roughness: 0.24, metalness: 0.88, emissive: 0xd4af37, emissiveIntensity: 0.22 },
         steel: { color: 0xdce4ee, roughness: 0.20, metalness: 0.88, emissive: 0x222832, emissiveIntensity: 0.25 }
       },
-      dong_son: {
-        id: 'dong_son',
-        name: 'Hào Khí Đông Sơn',
-        subtitle: 'Trống Đồng Lạc Việt • Mũ Lông Công & Rìu Chiến Cổ Loa',
-        tier: 'mythic',
-        priceVnd: 199000,
-        priceLabel: '199.000đ',
-        kitbashStyle: 'dong_son',
-        shatterColor: 0xf59e0b,
-        altarGlowColor: 0xf59e0b,
-        lightSqHex: 0xead8b1,
-        darkSqHex: 0x18342b,
-        label: '🎨 Skin: Đông Sơn',
-        white: { color: 0xe6c687, roughness: 0.24, metalness: 0.72, emissive: 0x78350f, emissiveIntensity: 0.22 },
-        black: { color: 0x12352a, roughness: 0.26, metalness: 0.58, emissive: 0x064e3b, emissiveIntensity: 0.28 },
-        trim: { color: 0xfbbf24, roughness: 0.18, metalness: 0.94, emissive: 0xd97706, emissiveIntensity: 0.42 },
-        steel: { color: 0xd97706, roughness: 0.22, metalness: 0.88, emissive: 0x92400e, emissiveIntensity: 0.30 }
-      },
-      shogun_yokai: {
-        id: 'shogun_yokai',
-        name: 'Đại Mạc Phủ Shogun',
-        subtitle: 'Giáp Samurai Sơn Mài • Sừng Kabuto & Kiếm Katana',
-        tier: 'mythic',
-        priceVnd: 199000,
-        priceLabel: '199.000đ',
-        kitbashStyle: 'shogun_yokai',
-        shatterColor: 0xff2a55,
-        altarGlowColor: 0xff3b30,
-        lightSqHex: 0xf2e4d8,
-        darkSqHex: 0x2b1118,
-        label: '🎨 Skin: Shogun Yokai',
-        white: { color: 0xf5ebe1, roughness: 0.16, metalness: 0.24, emissive: 0x450a0a, emissiveIntensity: 0.16 },
-        black: { color: 0x220910, roughness: 0.14, metalness: 0.52, emissive: 0x7f1d1d, emissiveIntensity: 0.34 },
-        trim: { color: 0xef4444, roughness: 0.16, metalness: 0.88, emissive: 0xdc2626, emissiveIntensity: 0.46 },
-        steel: { color: 0xfef08a, roughness: 0.14, metalness: 0.96, emissive: 0xca8a04, emissiveIntensity: 0.32 }
-      },
-      abyssal_lich: {
-        id: 'abyssal_lich',
-        name: 'Cửu U Minh Giới',
-        subtitle: 'Vương Miện Tử Thần • Lõi Linh Hồn Lục Bảo & Lưỡi Hái',
-        tier: 'epic',
-        priceVnd: 129000,
-        priceLabel: '129.000đ',
-        kitbashStyle: 'abyssal_lich',
-        shatterColor: 0x10b981,
-        altarGlowColor: 0x10b981,
-        lightSqHex: 0xd5ded9,
-        darkSqHex: 0x111824,
-        label: '🎨 Skin: Cửu U Lich',
-        white: { color: 0xdad4c8, roughness: 0.34, metalness: 0.18, emissive: 0x064e3b, emissiveIntensity: 0.26 },
-        black: { color: 0x0b0914, roughness: 0.18, metalness: 0.55, emissive: 0x3b0764, emissiveIntensity: 0.38 },
-        trim: { color: 0x10b981, roughness: 0.14, metalness: 0.86, emissive: 0x10b981, emissiveIntensity: 0.68 },
-        steel: { color: 0xa855f7, roughness: 0.16, metalness: 0.88, emissive: 0x7e22ce, emissiveIntensity: 0.52 }
-      },
-      mecha_ronin: {
-        id: 'mecha_ronin',
-        name: 'Cyberpunk Mecha 2099',
-        subtitle: 'Giáp Cơ Khí Titanium • Cánh Phản Lực & Kiếm Laser Neon',
-        tier: 'mythic',
-        priceVnd: 199000,
-        priceLabel: '199.000đ',
-        kitbashStyle: 'mecha_ronin',
-        shatterColor: 0x00f5d4,
-        altarGlowColor: 0x00f5d4,
-        lightSqHex: 0xdbeafe,
-        darkSqHex: 0x0f172a,
-        label: '🎨 Skin: Mecha 2099',
-        white: { color: 0xeef4fa, roughness: 0.14, metalness: 0.78, emissive: 0x0284c7, emissiveIntensity: 0.28 },
-        black: { color: 0x0f172a, roughness: 0.16, metalness: 0.84, emissive: 0xbe185d, emissiveIntensity: 0.34 },
-        trim: { color: 0x00f5d4, roughness: 0.10, metalness: 0.92, emissive: 0x00f5d4, emissiveIntensity: 0.82 },
-        steel: { color: 0xf72585, roughness: 0.12, metalness: 0.92, emissive: 0xf72585, emissiveIntensity: 0.68 }
-      },
-      valhalla_valkyrie: {
-        id: 'valhalla_valkyrie',
-        name: 'Thánh Điện Valhalla',
-        subtitle: 'Mũ Cánh Thiên Thần Valkyrie • Búa Thần Mjolnir & Cổ Ngữ Bắc Âu',
-        tier: 'epic',
-        priceVnd: 129000,
-        priceLabel: '129.000đ',
-        kitbashStyle: 'valhalla_valkyrie',
-        shatterColor: 0x38bdf8,
-        altarGlowColor: 0x38bdf8,
-        lightSqHex: 0xf0f6fc,
-        darkSqHex: 0x172554,
-        label: '🎨 Skin: Valhalla',
-        white: { color: 0xf8fafc, roughness: 0.16, metalness: 0.45, emissive: 0x0369a1, emissiveIntensity: 0.24 },
-        black: { color: 0x111c38, roughness: 0.18, metalness: 0.64, emissive: 0x1d4ed8, emissiveIntensity: 0.32 },
-        trim: { color: 0xfacc15, roughness: 0.14, metalness: 0.95, emissive: 0xeab308, emissiveIntensity: 0.48 },
-        steel: { color: 0x38bdf8, roughness: 0.14, metalness: 0.90, emissive: 0x0284c7, emissiveIntensity: 0.54 }
-      },
-      pharaoh_anubis: {
-        id: 'pharaoh_anubis',
-        name: 'Vương Triều Pharaoh',
-        subtitle: 'Mũ Nemes Hoàng Gia • Đĩa Mặt Trời Ra & Quyền Trượng Ankh',
-        tier: 'epic',
-        priceVnd: 129000,
-        priceLabel: '129.000đ',
-        kitbashStyle: 'pharaoh_anubis',
-        shatterColor: 0xfbbf24,
-        altarGlowColor: 0xf59e0b,
-        lightSqHex: 0xf3e2b3,
-        darkSqHex: 0x13233f,
-        label: '🎨 Skin: Pharaoh Ra',
-        white: { color: 0xf7e1a0, roughness: 0.20, metalness: 0.76, emissive: 0x92400e, emissiveIntensity: 0.24 },
-        black: { color: 0x0c192e, roughness: 0.16, metalness: 0.68, emissive: 0x0369a1, emissiveIntensity: 0.32 },
-        trim: { color: 0xf59e0b, roughness: 0.14, metalness: 0.96, emissive: 0xf59e0b, emissiveIntensity: 0.46 },
-        steel: { color: 0x0ea5e9, roughness: 0.16, metalness: 0.88, emissive: 0x0284c7, emissiveIntensity: 0.44 }
-      },
-      bauhaus_imperial: {
-        id: 'bauhaus_imperial',
-        name: 'Hoàng Gia Art Deco',
-        subtitle: 'Vòng Halo Hình Học Tối Giản Bauhaus & Sứ Trắng Mạ Vàng',
-        tier: 'standard',
-        priceVnd: 69000,
-        priceLabel: '69.000đ',
-        kitbashStyle: 'bauhaus_imperial',
-        shatterColor: 0xf5d76e,
-        altarGlowColor: 0xeab308,
-        lightSqHex: 0xf5f5f4,
-        darkSqHex: 0x1c1917,
-        label: '🎨 Skin: Art Deco',
-        white: { color: 0xfafaf9, roughness: 0.10, metalness: 0.15, emissive: 0x44403c, emissiveIntensity: 0.12 },
-        black: { color: 0x1c1917, roughness: 0.12, metalness: 0.48, emissive: 0x292524, emissiveIntensity: 0.20 },
-        trim: { color: 0xfbbf24, roughness: 0.12, metalness: 0.95, emissive: 0xd97706, emissiveIntensity: 0.34 },
-        steel: { color: 0xe7e5e4, roughness: 0.14, metalness: 0.92, emissive: 0x57534e, emissiveIntensity: 0.22 }
-      },
-      jade: {
-        id: 'jade',
-        name: 'Ngọc Bích Cổ Đại',
-        subtitle: 'Ngọc Phỉ Thúy & Hắc Thạch Tím Hoàng Gia',
-        tier: 'free',
-        priceVnd: 0,
-        priceLabel: 'Miễn phí',
-        kitbashStyle: 'none',
-        shatterColor: 0x34d399,
-        altarGlowColor: 0x10b981,
-        lightSqHex: 0xd8f3dc,
-        darkSqHex: 0x1d162b,
-        label: '🎨 Skin: Ngọc Bích',
-        white: { color: 0xb7f0d0, roughness: 0.16, metalness: 0.14, emissive: 0x0f5132, emissiveIntensity: 0.25 },
-        black: { color: 0x0b090e, roughness: 0.12, metalness: 0.55, emissive: 0x240046, emissiveIntensity: 0.30 },
-        trim: { color: 0xe09f3e, roughness: 0.22, metalness: 0.90, emissive: 0xe09f3e, emissiveIntensity: 0.28 },
-        steel: { color: 0x94d2bd, roughness: 0.18, metalness: 0.85, emissive: 0x0a9396, emissiveIntensity: 0.22 }
-      },
-      royal: {
-        id: 'royal',
-        name: 'Hoàng Kim Đế Vương',
-        subtitle: 'Vàng Ròng 24K & Hồng Ngọc Bóng Đêm',
-        tier: 'free',
-        priceVnd: 0,
-        priceLabel: 'Miễn phí',
-        kitbashStyle: 'none',
-        shatterColor: 0xfbbf24,
-        altarGlowColor: 0xf59e0b,
-        lightSqHex: 0xfef3c7,
-        darkSqHex: 0x311022,
-        label: '🎨 Skin: Hoàng Gia',
-        white: { color: 0xfbe38e, roughness: 0.18, metalness: 0.84, emissive: 0xb45309, emissiveIntensity: 0.20 },
-        black: { color: 0x1e1118, roughness: 0.20, metalness: 0.60, emissive: 0x4c0519, emissiveIntensity: 0.28 },
-        trim: { color: 0xf8fafc, roughness: 0.15, metalness: 0.95, emissive: 0x93c5fd, emissiveIntensity: 0.30 },
-        steel: { color: 0xf59e0b, roughness: 0.18, metalness: 0.92, emissive: 0x78350f, emissiveIntensity: 0.25 }
-      },
-      astral: {
-        id: 'astral',
-        name: 'Tinh Thể Ngân Hà',
-        subtitle: 'Pha Lê Ánh Sao & Hư Không Huyền Ảo',
-        tier: 'free',
-        priceVnd: 0,
-        priceLabel: 'Miễn phí',
-        kitbashStyle: 'none',
-        shatterColor: 0x38bdf8,
-        altarGlowColor: 0x38bdf8,
-        lightSqHex: 0xe0f2fe,
-        darkSqHex: 0x1e1b4b,
-        label: '🎨 Skin: Tinh Thể',
-        white: { color: 0xe0f2fe, roughness: 0.12, metalness: 0.25, emissive: 0x0284c7, emissiveIntensity: 0.45 },
-        black: { color: 0x1e1b4b, roughness: 0.14, metalness: 0.45, emissive: 0x7e22ce, emissiveIntensity: 0.48 },
-        trim: { color: 0x38bdf8, roughness: 0.16, metalness: 0.90, emissive: 0x38bdf8, emissiveIntensity: 0.55 },
-        steel: { color: 0xc084fc, roughness: 0.16, metalness: 0.88, emissive: 0x9333ea, emissiveIntensity: 0.40 }
-      },
-      slytherin: {
-        id: 'slytherin',
-        name: 'Hắc Xà Lục Bảo',
-        subtitle: 'Bạc Nguyên Chất & Ngọc Lục Bảo Xà Vương',
-        tier: 'free',
-        priceVnd: 0,
-        priceLabel: 'Miễn phí',
-        kitbashStyle: 'none',
-        shatterColor: 0x10b981,
-        altarGlowColor: 0x10b981,
-        lightSqHex: 0xe2e8f0,
-        darkSqHex: 0x063726,
-        label: '🎨 Skin: Lục Bảo',
-        white: { color: 0xdbe4ee, roughness: 0.22, metalness: 0.65, emissive: 0x1e293b, emissiveIntensity: 0.18 },
-        black: { color: 0x063726, roughness: 0.18, metalness: 0.48, emissive: 0x065f46, emissiveIntensity: 0.32 },
-        trim: { color: 0x10b981, roughness: 0.20, metalness: 0.88, emissive: 0x10b981, emissiveIntensity: 0.42 },
-        steel: { color: 0xe2e8f0, roughness: 0.16, metalness: 0.94, emissive: 0x334155, emissiveIntensity: 0.25 }
-      }
     };
 
-    const PIECE_THEME_ORDER = [
-      'hogwarts',
-      'dong_son',
-      'shogun_yokai',
-      'abyssal_lich',
-      'mecha_ronin',
-      'valhalla_valkyrie',
-      'pharaoh_anubis',
-      'bauhaus_imperial',
-      'jade',
-      'royal',
-      'astral',
-      'slytherin'
-    ];
+    const PIECE_THEME_ORDER = ['hogwarts'];
     let currentPieceThemeId = 'hogwarts';
+    let pieceMaskViewState = null;
     let activeSkinWhite = 'hogwarts';
     let activeSkinBlack = 'hogwarts';
-    let trialSkinId = null;
 
-    function loadUnlockedSkinsFromStorage() {
-      const defaults = ['hogwarts', 'jade', 'royal', 'astral', 'slytherin'];
-      try {
-        const raw = localStorage.getItem('wizard_chess_unlocked_skins_v1');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            return Array.from(new Set([...defaults, ...parsed]));
-          }
-        }
-      } catch (e) {}
-      return defaults;
-    }
-
-    let unlockedSkins = loadUnlockedSkinsFromStorage();
-
-    function isSkinUnlocked(skinId) {
-      const theme = PIECE_THEMES[skinId];
-      if (!theme || theme.tier === 'free') return true;
-      if (trialSkinId === skinId) return true;
-      return unlockedSkins.includes(skinId);
-    }
-
-    function unlockSkinPermanently(skinId) {
-      if (!PIECE_THEMES[skinId]) return false;
-      if (!unlockedSkins.includes(skinId)) {
-        unlockedSkins.push(skinId);
-        try {
-          localStorage.setItem('wizard_chess_unlocked_skins_v1', JSON.stringify(unlockedSkins));
-        } catch (e) {}
-      }
-      wizardAudio.playPromotionChime();
-      return true;
-    }
-
-    // Blender-Sculpted Per-Set 3D GLB Lazy-Loading & Hot-Swapping Architecture (Option 1)
-    const SCULPTED_SET_IDS = new Set([
-      'dong_son',
-      'shogun_yokai',
-      'valhalla_valkyrie',
-      'pharaoh_anubis',
-      'mecha_ronin',
-      'abyssal_lich',
-      'bauhaus_imperial'
-    ]);
+    // Skin sets that ship their own piece models under assets/glb/sets/<id>/. None ship today; a new skin
+    // package registers its id here and adds a PIECE_THEMES entry.
+    const SCULPTED_SET_IDS = new Set();
     const skinSetLoadPromises = {};
     const loadedCustomSkinSets = [];
 
@@ -1964,6 +1712,10 @@ export function initWizardChess() {
       if (type !== 'king' && type !== 'queen' && type !== 'bishop' && type !== 'elephant' && type !== 'advisor') {
         return;
       }
+      // The sculpted base statues carry their own crown, coronet and mitre; floating regalia only hides them.
+      if (pieceObj.loadedSetId === 'hogwarts' && (type === 'king' || type === 'queen' || type === 'bishop')) {
+        return;
+      }
 
       const grp = new THREE.Group();
       grp.name = 'PieceRoleRegaliaGroup';
@@ -2132,32 +1884,6 @@ export function initWizardChess() {
     const sanctumRelicCrystals = [];
     const sanctumOuterFloatingRelics = [];
 
-    function resolveOuterMonumentArchetype(themeId) {
-      switch (themeId) {
-        case 'dong_son':
-        case 'jade':
-          return 'dong_son';
-        case 'shogun_yokai':
-          return 'shogun_yokai';
-        case 'mecha_ronin':
-          return 'mecha_ronin';
-        case 'abyssal_lich':
-        case 'slytherin':
-          return 'abyssal_lich';
-        case 'valhalla_valkyrie':
-        case 'astral':
-          return 'valhalla_valkyrie';
-        case 'pharaoh_anubis':
-          return 'pharaoh_anubis';
-        case 'bauhaus_imperial':
-          return 'bauhaus_imperial';
-        case 'hogwarts':
-        case 'royal':
-        default:
-          return 'hogwarts';
-      }
-    }
-
     const BRAZIER_FLAME_PALETTES = {
       hogwarts: {
         light: 0xff9d3b,
@@ -2169,77 +1895,32 @@ export function initWizardChess() {
           { base: [0.95, 0.45, 0.09], mid: [0.76, 0.20, 0.03], tip: [0.38, 0.05, 0.01] }
         ]
       },
-      dong_son: {
-        light: 0xf59e0b,
-        coreSprite: 0xfcd34d,
-        haloSprite: 0xd97706,
-        layers: [
-          { base: [1.42, 1.08, 0.45], mid: [1.26, 0.74, 0.16], tip: [0.96, 0.36, 0.06] },
-          { base: [1.24, 0.82, 0.25], mid: [1.08, 0.48, 0.08], tip: [0.74, 0.18, 0.03] },
-          { base: [1.02, 0.54, 0.12], mid: [0.82, 0.26, 0.04], tip: [0.42, 0.08, 0.01] }
-        ]
-      },
-      shogun_yokai: {
-        light: 0xff3b30,
-        coreSprite: 0xff6b6b,
-        haloSprite: 0xdc2626,
-        layers: [
-          { base: [1.45, 0.78, 0.42], mid: [1.32, 0.28, 0.18], tip: [0.95, 0.06, 0.12] },
-          { base: [1.28, 0.45, 0.22], mid: [1.10, 0.14, 0.12], tip: [0.72, 0.03, 0.08] },
-          { base: [0.98, 0.22, 0.12], mid: [0.78, 0.08, 0.08], tip: [0.40, 0.01, 0.04] }
-        ]
-      },
-      mecha_ronin: {
-        light: 0x00f5d4,
-        coreSprite: 0x67e8f9,
-        haloSprite: 0x06b6d4,
-        layers: [
-          { base: [0.75, 1.45, 1.42], mid: [0.12, 1.18, 1.28], tip: [0.88, 0.15, 0.65] },
-          { base: [0.42, 1.25, 1.32], mid: [0.08, 0.92, 1.15], tip: [0.68, 0.10, 0.52] },
-          { base: [0.18, 0.95, 1.10], mid: [0.05, 0.58, 0.85], tip: [0.42, 0.05, 0.35] }
-        ]
-      },
-      abyssal_lich: {
-        light: 0x10b981,
-        coreSprite: 0x6ee7b7,
-        haloSprite: 0x059669,
-        layers: [
-          { base: [0.72, 1.42, 0.95], mid: [0.14, 1.15, 0.68], tip: [0.55, 0.18, 0.88] },
-          { base: [0.45, 1.22, 0.78], mid: [0.08, 0.88, 0.52], tip: [0.42, 0.12, 0.68] },
-          { base: [0.20, 0.92, 0.55], mid: [0.04, 0.55, 0.34], tip: [0.26, 0.06, 0.45] }
-        ]
-      },
-      valhalla_valkyrie: {
-        light: 0x38bdf8,
-        coreSprite: 0xbae6fd,
-        haloSprite: 0x0284c7,
-        layers: [
-          { base: [0.95, 1.38, 1.48], mid: [0.28, 0.96, 1.38], tip: [0.95, 0.78, 0.22] },
-          { base: [0.65, 1.18, 1.38], mid: [0.18, 0.76, 1.22], tip: [0.72, 0.58, 0.16] },
-          { base: [0.35, 0.88, 1.18], mid: [0.10, 0.52, 0.92], tip: [0.45, 0.35, 0.08] }
-        ]
-      },
-      pharaoh_anubis: {
-        light: 0xfbbf24,
-        coreSprite: 0xfde68a,
-        haloSprite: 0xd97706,
-        layers: [
-          { base: [1.48, 1.18, 0.52], mid: [1.30, 0.82, 0.18], tip: [0.14, 0.68, 0.96] },
-          { base: [1.28, 0.92, 0.28], mid: [1.12, 0.56, 0.10], tip: [0.10, 0.48, 0.78] },
-          { base: [1.05, 0.62, 0.14], mid: [0.85, 0.32, 0.05], tip: [0.06, 0.28, 0.52] }
-        ]
-      },
-      bauhaus_imperial: {
-        light: 0xfacc15,
-        coreSprite: 0xfef08a,
-        haloSprite: 0xca8a04,
-        layers: [
-          { base: [1.42, 1.25, 0.72], mid: [1.22, 0.92, 0.32], tip: [0.92, 0.56, 0.12] },
-          { base: [1.22, 1.02, 0.48], mid: [1.02, 0.68, 0.20], tip: [0.72, 0.38, 0.08] },
-          { base: [0.98, 0.76, 0.26], mid: [0.78, 0.45, 0.12], tip: [0.46, 0.20, 0.04] }
-        ]
-      }
     };
+
+    // Value ladder for play: black pieces < dark squares < light squares < white pieces. Both square colours sit in
+    // the mid-tones so a white piece is clearly lighter and a black piece clearly darker than any square it stands on.
+    // A theme keeps its hue; only the luminance (linear, relative) is set here.
+    const OUTER_TRIM_VALUE_SHARE = 0.5;
+    // Floor lines and arena ornaments away from the table sit lower still, so they frame the board without competing.
+    const ARENA_FLOOR_TRIM_VALUE_SHARE = 0.3;
+    const ARENA_FLOOR_GLOW_INTENSITY = 0.05;
+    // The lips of the table's base sit right under the dark apron, where any mid-value gold reads as a bright bar.
+    const TABLE_BASE_LIP_VALUE_SHARE = 0.14;
+    const BOARD_LIGHT_SQ_LUMINANCE = 0.152;
+    const BOARD_DARK_SQ_LUMINANCE = 0.08;
+    // Squares keep only part of the theme hue, so a piece of the same hue still separates from its square.
+    const BOARD_LIGHT_SQ_CHROMA = 0.7;
+    const BOARD_DARK_SQ_CHROMA = 0.55;
+    function setSquareColorAtLuminance(target, hex, luminance, chroma) {
+      target.setHex(hex);
+      const current = 0.2126 * target.r + 0.7152 * target.g + 0.0722 * target.b;
+      if (current < 1e-4) return target.setScalar(luminance);
+      const grey = new THREE.Color(luminance, luminance, luminance);
+      target.multiplyScalar(luminance / current).lerp(grey, 1 - chroma);
+      const peak = Math.max(target.r, target.g, target.b);
+      if (peak > 1) target.lerp(grey, 1 - 1 / peak);
+      return target;
+    }
 
     function updateSanctumAltarTheme(theme) {
       if (!theme) return;
@@ -2251,16 +1932,16 @@ export function initWizardChess() {
         sanctumRuneRingMat.needsUpdate = true;
       }
       if (sanctumMoatGlowMat) {
-        sanctumMoatGlowMat.color.setHex(glowHex);
+        sanctumMoatGlowMat.color.setHex(glowHex).multiplyScalar(TABLE_BASE_LIP_VALUE_SHARE);
         sanctumMoatGlowMat.emissive.setHex(glowHex);
         sanctumMoatGlowMat.needsUpdate = true;
       }
       if (sanctumLightSqMat && theme.lightSqHex) {
-        sanctumLightSqMat.color.setHex(theme.lightSqHex);
+        setSquareColorAtLuminance(sanctumLightSqMat.color, theme.lightSqHex, theme.boardLightLuminance || BOARD_LIGHT_SQ_LUMINANCE, BOARD_LIGHT_SQ_CHROMA);
         sanctumLightSqMat.needsUpdate = true;
       }
       if (sanctumDarkSqMat && theme.darkSqHex) {
-        sanctumDarkSqMat.color.setHex(theme.darkSqHex);
+        setSquareColorAtLuminance(sanctumDarkSqMat.color, theme.darkSqHex, theme.boardDarkLuminance || BOARD_DARK_SQ_LUMINANCE, BOARD_DARK_SQ_CHROMA);
         sanctumDarkSqMat.needsUpdate = true;
       }
       for (const cr of sanctumRelicCrystals) {
@@ -2271,7 +1952,7 @@ export function initWizardChess() {
       }
 
       // Sync Outer Perimeter Amphitheater & 8 Theme-Reactive Monument Archetypes (Δgeometries = 0)
-      const archetype = resolveOuterMonumentArchetype(theme.id);
+      const archetype = 'hogwarts';
       currentOuterMonumentArchetype = archetype;
       for (const [key, grp] of Object.entries(outerMonumentGroupsByTheme)) {
         if (grp) {
@@ -2285,13 +1966,13 @@ export function initWizardChess() {
         sanctumOuterStoneMat.needsUpdate = true;
       }
       if (sanctumOuterTrimMat) {
-        sanctumOuterTrimMat.color.setHex(trimHex);
+        sanctumOuterTrimMat.color.setHex(trimHex).multiplyScalar(ARENA_FLOOR_TRIM_VALUE_SHARE);
         sanctumOuterTrimMat.emissive.setHex(theme.trim?.emissive || glowHex);
-        sanctumOuterTrimMat.emissiveIntensity = Math.min(0.55, (theme.trim?.emissiveIntensity || 0.28) * 0.9);
+        sanctumOuterTrimMat.emissiveIntensity = ARENA_FLOOR_GLOW_INTENSITY;
         sanctumOuterTrimMat.needsUpdate = true;
       }
       if (sanctumOuterGlowMat) {
-        sanctumOuterGlowMat.color.setHex(glowHex);
+        sanctumOuterGlowMat.color.setHex(glowHex).multiplyScalar(ARENA_FLOOR_TRIM_VALUE_SHARE);
         sanctumOuterGlowMat.emissive.setHex(glowHex);
         sanctumOuterGlowMat.needsUpdate = true;
       }
@@ -2341,8 +2022,8 @@ export function initWizardChess() {
     };
 
     const CHESS_DEFAULT_ROLE_MATERIALS = {
-      whiteSteed: { color: 0x9a3412, roughness: 0.24, metalness: 0.24, emissive: 0x451a03, emissiveIntensity: 0.28 },
-      blackSteed: { color: 0xe2e8f0, roughness: 0.20, metalness: 0.38, emissive: 0x1e293b, emissiveIntensity: 0.28 },
+      whiteSteed: { color: 0xecd8ba, roughness: 0.34, metalness: 0.06, emissive: 0x000000, emissiveIntensity: 0.0 },
+      blackSteed: { color: 0x2c3850, roughness: 0.40, metalness: 0.18, emissive: 0x0b1220, emissiveIntensity: 0.22 },
       whiteQueenAccent: { color: 0xa855f7, roughness: 0.16, metalness: 0.68, emissive: 0x7e22ce, emissiveIntensity: 0.58 },
       blackQueenAccent: { color: 0xf43f5e, roughness: 0.16, metalness: 0.68, emissive: 0xbe123c, emissiveIntensity: 0.62 },
       whiteBishopAccent: { color: 0x0284c7, roughness: 0.16, metalness: 0.65, emissive: 0x0369a1, emissiveIntensity: 0.52 },
@@ -2417,12 +2098,12 @@ export function initWizardChess() {
 
       if (typeof sharedWhitePedestalRingMat !== 'undefined' && sharedWhitePedestalRingMat) {
         sharedWhitePedestalRingMat.color.setHex(
-          typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' ? 0xff4d4f : 0xfff8e1
+          typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' ? 0xff4d4f : 0xf4efe4
         );
       }
       if (typeof sharedBlackPedestalRingMat !== 'undefined' && sharedBlackPedestalRingMat) {
         sharedBlackPedestalRingMat.color.setHex(
-          typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' ? 0x38bdf8 : 0xd4af37
+          typeof gameVariant !== 'undefined' && gameVariant === 'xiangqi' ? 0x38bdf8 : 0x0b0d12
         );
       }
 
@@ -2447,25 +2128,12 @@ export function initWizardChess() {
         renderer.shadowMap.needsUpdate = true;
       }
 
-      const btnSkin = document.getElementById('btn-piece-skin');
-      if (btnSkin) {
-        btnSkin.textContent = theme.label;
-      }
-      if (typeof syncSkinBoutiqueUI === 'function') {
-        syncSkinBoutiqueUI();
-      }
       return currentPieceThemeId;
-    }
-
-    function cyclePieceTheme() {
-      const idx = PIECE_THEME_ORDER.indexOf(currentPieceThemeId);
-      const nextId = PIECE_THEME_ORDER[(idx + 1) % PIECE_THEME_ORDER.length];
-      return applyPieceTheme(nextId, 'both');
     }
 
     // Shared Faction Pedestal Ring Geometry & Materials for instant White vs Black readability on all 64 squares (Δgeometries = 0)
     const sharedPiecePedestalRingGeo = (() => {
-      const g = new THREE.RingGeometry(0.41, 0.52, 28);
+      const g = new THREE.RingGeometry(0.43, 0.50, 28);
       g.rotateX(-Math.PI / 2);
       g.translate(0, 0.015, 0);
       g.userData = { isSharedPool: true };
@@ -2479,7 +2147,7 @@ export function initWizardChess() {
       userData: { isSharedPool: true }
     });
     const sharedBlackPedestalRingMat = new THREE.MeshBasicMaterial({
-      color: 0xd4af37,
+      color: 0x0b0d12,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.88,
@@ -2617,6 +2285,8 @@ export function initWizardChess() {
       return tex;
     }
 
+    const TABLE_APRON_HALF = 2.5;
+    const TABLE_PYLON_OFFSET = 2.34;
     function buildSanctumArenaAltar() {
       const addStaticAltarMesh = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0, recvShadow = true) => {
         const m = new THREE.Mesh(geo, mat);
@@ -2631,22 +2301,25 @@ export function initWizardChess() {
         return m;
       };
 
+      // The table and its steps are matte dark stone: nothing next to the squares may mirror a light into the bloom.
       const darkObsidianPlinthMat = new THREE.MeshStandardMaterial({
         color: 0x10131c,
-        roughness: 0.28,
-        metalness: 0.24
+        roughness: 0.78,
+        metalness: 0.04,
+        envMapIntensity: 0.2
       });
       const carvedAshlarStepMat = new THREE.MeshStandardMaterial({
         color: 0x191e2b,
-        roughness: 0.36,
-        metalness: 0.18
+        roughness: 0.82,
+        metalness: 0.04,
+        envMapIntensity: 0.2
       });
       sanctumMoatGlowMat = new THREE.MeshStandardMaterial({
-        color: 0xd4af37,
-        roughness: 0.18,
-        metalness: 0.90,
+        color: 0x1e1808,
+        roughness: 0.7,
+        metalness: 0.4,
         emissive: 0xd4af37,
-        emissiveIntensity: 0.55
+        emissiveIntensity: 0.03
       });
 
       const coordTex = createSanctumCoordinateTexture();
@@ -2656,8 +2329,9 @@ export function initWizardChess() {
         emissive: 0xd4af37,
         emissiveMap: coordTex,
         emissiveIntensity: 0.28,
-        roughness: 0.26,
-        metalness: 0.65
+        roughness: 0.8,
+        metalness: 0.0,
+        envMapIntensity: 0.2
       });
 
       // 1. Stepped Beveled Octagonal Grand Sanctum Dais (3 architectural tiers encasing the central altar)
@@ -2681,13 +2355,23 @@ export function initWizardChess() {
       const upperDeckGeo = new THREE.BoxGeometry(4.24, 0.23, 4.24);
       addStaticAltarMesh(upperDeckGeo, darkObsidianPlinthMat, 0, 0.625, 0);
 
+      // Plain dark apron around the deck: edge-file pieces stand against a calm surface, not against floor ornaments.
+      const apronMat = new THREE.MeshStandardMaterial({
+        color: 0x0c0e15,
+        roughness: 0.92,
+        metalness: 0.02,
+        envMapIntensity: 0.15
+      });
+      const apronGeo = new THREE.BoxGeometry(TABLE_APRON_HALF * 2, 0.11, TABLE_APRON_HALF * 2);
+      addStaticAltarMesh(apronGeo, apronMat, 0, 0.681, 0);
+
       // 3. Coordinate & Arcane Inlay Top Plate (4.08m x 4.08m at y = 0.743, framing the 3.52m 8x8 chessboard)
       const coordDeckGeo = new THREE.BoxGeometry(4.08, 0.012, 4.08);
       addStaticAltarMesh(coordDeckGeo, sanctumRuneRingMat, 0, 0.741, 0);
 
       // 4. Outer Sacred Octagonal Halo Ring & Corner Sentinel Relic Pylons
-      const outerCurbW = 0.065;
-      const outerCurbH = 0.044;
+      const outerCurbW = 0.03;
+      const outerCurbH = 0.03;
       const halfDeck = 2.09;
       const hCurbGeo = new THREE.BoxGeometry(halfDeck * 2 + outerCurbW * 2, outerCurbH, outerCurbW);
       const vCurbGeo = new THREE.BoxGeometry(outerCurbW, outerCurbH, halfDeck * 2);
@@ -2696,17 +2380,17 @@ export function initWizardChess() {
         addStaticAltarMesh(vCurbGeo, boardGoldTrimMat, s * halfDeck, 0.752, 0);
       }
 
-      // 4 Corner Sentinel Relic Pylons with floating Arcane Crystals at (±2.02, 0.75, ±2.02)
+      // 4 Corner Sentinel Relic Pylons with floating Arcane Crystals on the apron corners
       const pylonBaseGeo = new THREE.CylinderGeometry(0.11, 0.14, 0.14, 8);
       const crystalGeo = new THREE.OctahedronGeometry(0.075, 0);
       crystalGeo.scale(0.85, 1.45, 0.85);
       const orbitRingGeo = new THREE.TorusGeometry(0.115, 0.012, 8, 24);
 
       const cornerCoords = [
-        [-2.02, -2.02],
-        [2.02, -2.02],
-        [-2.02, 2.02],
-        [2.02, 2.02]
+        [-TABLE_PYLON_OFFSET, -TABLE_PYLON_OFFSET],
+        [TABLE_PYLON_OFFSET, -TABLE_PYLON_OFFSET],
+        [-TABLE_PYLON_OFFSET, TABLE_PYLON_OFFSET],
+        [TABLE_PYLON_OFFSET, TABLE_PYLON_OFFSET]
       ];
       cornerCoords.forEach(([cx, cz], idx) => {
         addStaticAltarMesh(pylonBaseGeo, darkObsidianPlinthMat, cx, 0.81, cz);
@@ -2714,6 +2398,9 @@ export function initWizardChess() {
         addStaticAltarMesh(capRing, boardGoldTrimMat, cx, 0.885, cz);
 
         const crystalMat = sanctumMoatGlowMat.clone();
+        crystalMat.roughness = 0.5;
+        crystalMat.metalness = 0.55;
+        crystalMat.emissiveIntensity = 0.12;
         const crystalMesh = new THREE.Mesh(crystalGeo, crystalMat);
         crystalMesh.position.set(cx, 1.04, cz);
         crystalMesh.raycast = () => {};
@@ -2739,29 +2426,32 @@ export function initWizardChess() {
     function buildSanctumOuterArena(addStaticAltarMesh, darkObsidianPlinthMat, carvedAshlarStepMat) {
       sanctumOuterStoneMat = new THREE.MeshStandardMaterial({
         color: 0x1b2232,
-        roughness: 0.30,
-        metalness: 0.28,
+        roughness: 0.74,
+        metalness: 0.06,
         emissive: 0x080b12,
         emissiveIntensity: 0.16
       });
+      // The arena around the table stays below the board in value: aged trim, a faint glow, no polished gold.
       sanctumOuterTrimMat = new THREE.MeshStandardMaterial({
-        color: 0xd4af37,
-        roughness: 0.20,
-        metalness: 0.90,
+        color: 0x40350f,
+        roughness: 0.7,
+        metalness: 0.4,
         emissive: 0xd4af37,
-        emissiveIntensity: 0.30
+        emissiveIntensity: ARENA_FLOOR_GLOW_INTENSITY
       });
       sanctumOuterGlowMat = new THREE.MeshStandardMaterial({
-        color: 0xd4af37,
-        roughness: 0.14,
-        metalness: 0.85,
+        color: 0x40350f,
+        roughness: 0.7,
+        metalness: 0.4,
         emissive: 0xd4af37,
-        emissiveIntensity: 0.88
+        emissiveIntensity: ARENA_FLOOR_GLOW_INTENSITY
       });
+      // Matte: a polished floor mirrors the key light as a white patch beside the board.
       const darkMoatBasinMat = new THREE.MeshStandardMaterial({
         color: 0x070a10,
-        roughness: 0.20,
-        metalness: 0.38
+        roughness: 0.88,
+        metalness: 0.04,
+        envMapIntensity: 0.2
       });
 
       const tmpMat4 = new THREE.Matrix4();
@@ -2833,8 +2523,9 @@ export function initWizardChess() {
 
       const outerTerraceMat = new THREE.MeshStandardMaterial({
         color: 0x0b0f18,
-        roughness: 0.28,
-        metalness: 0.30
+        roughness: 0.88,
+        metalness: 0.04,
+        envMapIntensity: 0.2
       });
       const outerTerraceGeo = new THREE.RingGeometry(4.46, 6.28, 32);
       outerTerraceGeo.rotateX(-Math.PI / 2);
@@ -3009,16 +2700,7 @@ export function initWizardChess() {
         { x: 3.58, z: 3.25, yaw: Math.atan2(-3.58, -3.25) }
       ];
 
-      const ARCHETYPES = [
-        'hogwarts',
-        'dong_son',
-        'shogun_yokai',
-        'mecha_ronin',
-        'abyssal_lich',
-        'valhalla_valkyrie',
-        'pharaoh_anubis',
-        'bauhaus_imperial'
-      ];
+      const ARCHETYPES = ['hogwarts'];
 
       for (const themeKey of ARCHETYPES) {
         const tGroup = new THREE.Group();
@@ -3042,85 +2724,16 @@ export function initWizardChess() {
             pushLocalPart(mGlow, boxGeo, 0, p.z, p.yaw, s * 1.34, 0.84, 0.165, 0, 0, 0, 0.055, 0.80, 0.02);
           }
 
-          if (themeKey === 'hogwarts') {
-            // Pointed Gothic Triforium Arch & Rose Tracery Wheel + Spire Finials
-            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.12, 0.16, 0.32);
-            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.48, 0, 0, 0, 0, 3.24, 0.045, 0.36);
-            for (const s of [-1, 1]) {
-              pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, s * 0.62, 1.72, 0, 0, 0, -s * 0.42, 1.36, 0.12, 0.24);
-              pushLocalPart(mTrim, cone8Geo, 0, p.z, p.yaw, s * 1.34, 1.76, 0, 0, 0, 0, 0.18, 0.65, 0.18);
-            }
-            pushLocalPart(mTrim, torusGeo, 0, p.z, p.yaw, 0, 1.72, 0, 0, 0, 0, 0.34, 0.34, 0.34);
-            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.72, 0, 0, 0, 0, 0.16, 0.26, 0.16);
-            pushLocalPart(mTrim, cone8Geo, 0, p.z, p.yaw, 0, 2.12, 0, 0, 0, 0, 0.14, 0.42, 0.14);
-          } else if (themeKey === 'dong_son') {
-            // Colossal Trống Đồng Ngọc Lũ Sun-Disc Tympanum & Sweeping Chim Lạc Wings
-            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.36, 0, 0, 0, 0, 3.25, 0.16, 0.30);
-            pushLocalPart(mTrim, cyl12Geo, 0, p.z, p.yaw, 0, 1.72, 0, Math.PI / 2, 0, 0, 0.52, 0.12, 0.52);
-            pushLocalPart(mGlow, torusGeo, 0, p.z, p.yaw, 0, 1.72, 0.07, 0, 0, 0, 0.38, 0.38, 0.38);
-            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.72, 0.09, 0, 0, 0, 0.18, 0.18, 0.10);
-            for (const s of [-1, 1]) {
-              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 0.98, 1.62, 0, 0, 0, s * 0.26, 0.96, 0.10, 0.14);
-              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 1.34, 1.78, 0, 0, 0, s * 0.40, 0.72, 0.08, 0.12);
-              pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, s * 1.34, 1.72, 0, 0, 0, 0, 0.14, 0.28, 0.14);
-            }
-          } else if (themeKey === 'shogun_yokai') {
-            // Grand Vermilion Myōjin Torii Gate (Nuki tie-beam + Curved Kasagi upper lintel + Shogun Crest)
-            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.16, 0, 0, 0, 0, 3.18, 0.11, 0.18);
-            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.48, 0, 0, 0, 0, 3.48, 0.14, 0.26);
-            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.58, 0, 0, 0, 0, 3.76, 0.10, 0.32);
-            for (const s of [-1, 1]) {
-              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 1.88, 1.66, 0, 0, 0, s * 0.26, 0.52, 0.10, 0.30);
-            }
-            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.32, 0, 0, 0, 0, 0.28, 0.30, 0.16);
-            pushLocalPart(mGlow, torusGeo, 0, p.z, p.yaw, 0, 1.84, 0, 0, 0, 0, 0.30, 0.30, 0.30);
-            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.84, 0, 0, 0, 0, 0.15, 0.22, 0.15);
-          } else if (themeKey === 'mecha_ronin') {
-            // Cyberpunk 2099 Hexagonal Neon Reactor Gantry & Holo-Rings
-            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.40, 0, 0, 0, 0, 3.16, 0.18, 0.30);
-            pushLocalPart(mGlow, boxGeo, 0, p.z, p.yaw, 0, 1.40, 0.16, 0, 0, 0, 2.90, 0.05, 0.04);
-            for (const s of [-1, 1]) {
-              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 0.96, 1.72, 0, 0, 0, s * 0.42, 1.12, 0.10, 0.18);
-              pushLocalPart(mGlow, boxGeo, 0, p.z, p.yaw, s * 1.34, 1.72, 0, 0, 0, 0, 0.12, 0.56, 0.12);
-            }
-            pushLocalPart(mGlow, torusGeo, 0, p.z, p.yaw, 0, 1.76, 0, 0, 0, 0, 0.38, 0.38, 0.38);
-            pushLocalPart(mTrim, octGeo, 0, p.z, p.yaw, 0, 1.76, 0, 0, 0, 0, 0.18, 0.18, 0.18);
-          } else if (themeKey === 'abyssal_lich') {
-            // Cửu U Necropolis Spiked Obsidian Arch & Floating Emerald Soul Nexus
-            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.10, 0.16, 0.30);
-            for (const s of [-1, 1]) {
-              pushLocalPart(mStone, cone4Geo, 0, p.z, p.yaw, s * 1.34, 1.82, 0, 0, Math.PI / 4, -s * 0.14, 0.22, 0.78, 0.22);
-              pushLocalPart(mStone, cone4Geo, 0, p.z, p.yaw, s * 0.65, 1.68, 0, 0, Math.PI / 4, -s * 0.36, 0.16, 0.66, 0.16);
-            }
-            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.78, 0, 0, 0, 0, 0.22, 0.38, 0.22);
-            pushLocalPart(mTrim, torusGeo, 0, p.z, p.yaw, 0, 1.78, 0, 0, 0, 0, 0.36, 0.36, 0.36);
-          } else if (themeKey === 'valhalla_valkyrie') {
-            // Asgardian Bifrost Runic Monolith Arch & Aurora Crystal Crown
-            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.14, 0.18, 0.32);
-            pushLocalPart(mTrim, torusGeo, 0, p.z, p.yaw, 0, 1.76, 0, 0, 0, 0, 0.42, 0.42, 0.42);
-            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.80, 0, 0, 0, 0, 0.18, 0.42, 0.18);
-            for (const s of [-1, 1]) {
-              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 0.88, 1.70, 0, 0, 0, s * 0.34, 0.96, 0.11, 0.16);
-              pushLocalPart(mGlow, cone8Geo, 0, p.z, p.yaw, s * 1.34, 1.76, 0, 0, 0, 0, 0.16, 0.68, 0.16);
-            }
-          } else if (themeKey === 'pharaoh_anubis') {
-            // Karnak Temple Pylon Cornice, Winged Solar Disc of Ra & Golden Pyramidion
-            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.24, 0.20, 0.36);
-            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.52, 0, 0, 0, 0, 3.44, 0.08, 0.42);
-            pushLocalPart(mGlow, cyl12Geo, 0, p.z, p.yaw, 0, 1.74, 0, Math.PI / 2, 0, 0, 0.26, 0.12, 0.26);
-            pushLocalPart(mTrim, cone4Geo, 0, p.z, p.yaw, 0, 2.08, 0, 0, Math.PI / 4, 0, 0.28, 0.38, 0.28);
-            for (const s of [-1, 1]) {
-              pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, s * 0.78, 1.72, 0, 0, 0, s * 0.14, 0.98, 0.10, 0.14);
-              pushLocalPart(mTrim, cone4Geo, 0, p.z, p.yaw, s * 1.34, 1.66, 0, 0, Math.PI / 4, 0, 0.26, 0.38, 0.26);
-            }
-          } else {
-            // Bauhaus Imperial Art Deco Stepped Sunburst Arch & Armillary Sphere
-            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.12, 0.16, 0.30);
-            pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.52, 0, 0, 0, 0, 2.24, 0.14, 0.26);
-            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.66, 0, 0, 0, 0, 1.42, 0.14, 0.22);
-            pushLocalPart(mTrim, torusGeo, 0, p.z, p.yaw, 0, 1.88, 0, 0, 0, 0, 0.32, 0.32, 0.32);
-            pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.88, 0, 0, 0, 0, 0.16, 0.16, 0.16);
+          // Pointed Gothic Triforium Arch & Rose Tracery Wheel + Spire Finials
+          pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, 0, 1.38, 0, 0, 0, 0, 3.12, 0.16, 0.32);
+          pushLocalPart(mTrim, boxGeo, 0, p.z, p.yaw, 0, 1.48, 0, 0, 0, 0, 3.24, 0.045, 0.36);
+          for (const s of [-1, 1]) {
+            pushLocalPart(mStone, boxGeo, 0, p.z, p.yaw, s * 0.62, 1.72, 0, 0, 0, -s * 0.42, 1.36, 0.12, 0.24);
+            pushLocalPart(mTrim, cone8Geo, 0, p.z, p.yaw, s * 1.34, 1.76, 0, 0, 0, 0, 0.18, 0.65, 0.18);
           }
+          pushLocalPart(mTrim, torusGeo, 0, p.z, p.yaw, 0, 1.72, 0, 0, 0, 0, 0.34, 0.34, 0.34);
+          pushLocalPart(mGlow, octGeo, 0, p.z, p.yaw, 0, 1.72, 0, 0, 0, 0, 0.16, 0.26, 0.16);
+          pushLocalPart(mTrim, cone8Geo, 0, p.z, p.yaw, 0, 2.12, 0, 0, 0, 0, 0.14, 0.42, 0.14);
         }
 
         // 2. 4 Flanking Colossal Guardian Monuments (x = ±2.18m, z = ±4.55m)
@@ -3129,52 +2742,12 @@ export function initWizardChess() {
           pushLocalPart(mTrim, cyl8Geo, g.x, g.z, g.yaw, 0, 0.34, 0, 0, 0, 0, 0.42, 0.036, 0.42);
           pushLocalPart(mStone, cyl8Geo, g.x, g.z, g.yaw, 0, 0.62, 0, 0, 0, 0, 0.30, 0.52, 0.30);
 
-          if (themeKey === 'hogwarts') {
-            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.18, 0, 0, 0, 0, 0.42, 0.64, 0.30);
-            pushLocalPart(mTrim, boxGeo, g.x, g.z, g.yaw, 0, 1.42, 0, 0, 0, 0, 0.58, 0.14, 0.34);
-            pushLocalPart(mStone, cyl8Geo, g.x, g.z, g.yaw, 0, 1.66, 0, 0, 0, 0, 0.16, 0.28, 0.16);
-            pushLocalPart(mTrim, cone4Geo, g.x, g.z, g.yaw, 0, 1.90, 0, 0, Math.PI / 4, 0, 0.18, 0.28, 0.18);
-            pushLocalPart(mTrim, boxGeo, g.x, g.z, g.yaw, 0, 1.16, 0.24, 0, 0, 0, 0.32, 0.05, 0.07);
-            pushLocalPart(mGlow, boxGeo, g.x, g.z, g.yaw, 0, 0.78, 0.24, 0, 0, 0, 0.05, 0.76, 0.03);
-          } else if (themeKey === 'dong_son') {
-            pushLocalPart(mStone, cyl8Geo, g.x, g.z, g.yaw, 0, 1.22, 0, 0, 0, 0, 0.24, 0.72, 0.24);
-            pushLocalPart(mTrim, cyl12Geo, g.x, g.z, g.yaw, 0, 1.68, 0, Math.PI / 2, 0, 0, 0.36, 0.10, 0.36);
-            pushLocalPart(mGlow, octGeo, g.x, g.z, g.yaw, 0, 1.68, 0.07, 0, 0, 0, 0.15, 0.15, 0.10);
-            pushLocalPart(mTrim, cone4Geo, g.x, g.z, g.yaw, 0, 2.08, 0, 0, 0, 0, 0.26, 0.48, 0.09);
-          } else if (themeKey === 'shogun_yokai') {
-            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.16, 0, 0, 0, 0, 0.38, 0.56, 0.32);
-            pushLocalPart(mGlow, boxGeo, g.x, g.z, g.yaw, 0, 1.54, 0, 0, 0, 0, 0.24, 0.26, 0.24);
-            pushLocalPart(mStone, cone4Geo, g.x, g.z, g.yaw, 0, 1.78, 0, 0, Math.PI / 4, 0, 0.48, 0.24, 0.48);
-            for (const s of [-1, 1]) {
-              pushLocalPart(mTrim, boxGeo, g.x, g.z, g.yaw, s * 0.26, 1.98, 0.08, 0, 0, s * 0.45, 0.40, 0.07, 0.05);
-            }
-          } else if (themeKey === 'mecha_ronin') {
-            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.26, 0, 0, 0, 0, 0.34, 0.86, 0.34);
-            pushLocalPart(mGlow, boxGeo, g.x, g.z, g.yaw, 0, 1.28, 0.18, 0, 0, 0, 0.08, 0.78, 0.04);
-            for (const s of [-1, 1]) {
-              pushLocalPart(mTrim, boxGeo, g.x, g.z, g.yaw, s * 0.28, 1.48, -0.04, 0, 0, s * 0.32, 0.36, 0.54, 0.07);
-            }
-            pushLocalPart(mGlow, torusGeo, g.x, g.z, g.yaw, 0, 1.88, 0, 0, 0, 0, 0.24, 0.24, 0.24);
-          } else if (themeKey === 'abyssal_lich') {
-            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.24, 0, 0, Math.PI / 4, 0, 0.30, 0.82, 0.30);
-            pushLocalPart(mStone, cone4Geo, g.x, g.z, g.yaw, 0, 1.84, 0, 0, Math.PI / 4, 0, 0.26, 0.44, 0.26);
-            pushLocalPart(mGlow, octGeo, g.x, g.z, g.yaw, 0, 2.18, 0, 0, 0, 0, 0.15, 0.26, 0.15);
-          } else if (themeKey === 'valhalla_valkyrie') {
-            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.22, 0, 0, 0, 0, 0.36, 0.76, 0.24);
-            pushLocalPart(mGlow, cone8Geo, g.x, g.z, g.yaw, 0, 1.84, 0, 0, 0, 0, 0.18, 0.68, 0.18);
-            for (const s of [-1, 1]) {
-              pushLocalPart(mGlow, cone8Geo, g.x, g.z, g.yaw, s * 0.20, 1.52, 0, 0, 0, -s * 0.28, 0.12, 0.48, 0.12);
-            }
-            pushLocalPart(mTrim, torusGeo, g.x, g.z, g.yaw, 0, 1.68, 0, 0, 0, 0, 0.26, 0.26, 0.26);
-          } else if (themeKey === 'pharaoh_anubis') {
-            pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.32, 0, 0, 0, 0, 0.30, 0.96, 0.30);
-            pushLocalPart(mTrim, cone4Geo, g.x, g.z, g.yaw, 0, 1.98, 0, 0, Math.PI / 4, 0, 0.24, 0.38, 0.24);
-            pushLocalPart(mGlow, boxGeo, g.x, g.z, g.yaw, 0, 1.32, 0.16, 0, 0, 0, 0.05, 0.82, 0.02);
-          } else {
-            pushLocalPart(mStone, cyl12Geo, g.x, g.z, g.yaw, 0, 1.24, 0, 0, 0, 0, 0.22, 0.82, 0.22);
-            pushLocalPart(mTrim, torusGeo, g.x, g.z, g.yaw, 0, 1.84, 0, 0, 0, 0, 0.26, 0.26, 0.26);
-            pushLocalPart(mGlow, octGeo, g.x, g.z, g.yaw, 0, 1.84, 0, 0, 0, 0, 0.13, 0.13, 0.13);
-          }
+          pushLocalPart(mStone, boxGeo, g.x, g.z, g.yaw, 0, 1.18, 0, 0, 0, 0, 0.42, 0.64, 0.30);
+          pushLocalPart(mTrim, boxGeo, g.x, g.z, g.yaw, 0, 1.42, 0, 0, 0, 0, 0.58, 0.14, 0.34);
+          pushLocalPart(mStone, cyl8Geo, g.x, g.z, g.yaw, 0, 1.66, 0, 0, 0, 0, 0.16, 0.28, 0.16);
+          pushLocalPart(mTrim, cone4Geo, g.x, g.z, g.yaw, 0, 1.90, 0, 0, Math.PI / 4, 0, 0.18, 0.28, 0.18);
+          pushLocalPart(mTrim, boxGeo, g.x, g.z, g.yaw, 0, 1.16, 0.24, 0, 0, 0, 0.32, 0.05, 0.07);
+          pushLocalPart(mGlow, boxGeo, g.x, g.z, g.yaw, 0, 0.78, 0.24, 0, 0, 0, 0.05, 0.76, 0.03);
         }
 
         // 3. 4 Outer Sanctum Pylons (x = ±3.58m, z = ±3.25m) framing wide 16:9 & diagonal views
@@ -3477,14 +3050,16 @@ export function initWizardChess() {
       sqGeo.computeBoundingBox();
       sqGeo.computeBoundingSphere();
       sanctumLightSqMat = new THREE.MeshStandardMaterial({
-        color: 0xefe7d6,
-        roughness: 0.44,
-        metalness: 0.04
+        color: 0xa89e8a,
+        roughness: 0.86,
+        metalness: 0.0,
+        envMapIntensity: 0.15
       });
       sanctumDarkSqMat = new THREE.MeshStandardMaterial({
-        color: 0x181f2e,
-        roughness: 0.26,
-        metalness: 0.20
+        color: 0x5a6370,
+        roughness: 0.82,
+        metalness: 0.0,
+        envMapIntensity: 0.15
       });
 
       for (let r = 0; r < 8; r++) {
@@ -3504,7 +3079,7 @@ export function initWizardChess() {
 
       // Sculpted Golden Inner Border Frame around the 3.52m 8x8 tiles on top of the Sanctum Battle Dais
       const halfB = 4.0 * BOARD_SQ_SIZE;
-      const rimW = 0.055;
+      const rimW = 0.03;
       const rimH = 0.044;
       const horizGeo = new THREE.BoxGeometry(halfB * 2 + rimW * 2, rimH, rimW);
       const vertGeo = new THREE.BoxGeometry(rimW, rimH, halfB * 2);
@@ -3540,6 +3115,8 @@ export function initWizardChess() {
     // =========================================================================
     // Native Baked Wall/Column Stone (Original Ashlar) & Floor Stone (Abbey Flagstone)
     // =========================================================================
+    // The hall is a backdrop: its stone keeps the baked texture at a reduced value so the board stays the brightest surface.
+    const HALL_BACKDROP_VALUE = 0.55;
     const WALL_STONE_LOOKS = [
       {
         name: 'Original Ashlar',
@@ -3717,7 +3294,7 @@ export function initWizardChess() {
         mat.roughness = cfg.roughness;
         mat.metalness = 0.02;
         if ('envMapIntensity' in mat) mat.envMapIntensity = 0.45;
-        if (mat.color) mat.color.setRGB(1, 1, 1);
+        if (mat.color) mat.color.setScalar(HALL_BACKDROP_VALUE);
         if (mat.normalScale) mat.normalScale.set(cfg.normalScale, cfg.normalScale);
         mat.needsUpdate = true;
       }
@@ -3731,7 +3308,7 @@ export function initWizardChess() {
         mat.roughness = cfg.roughness;
         mat.metalness = 0.02;
         if ('envMapIntensity' in mat) mat.envMapIntensity = 0.48;
-        if (mat.color) mat.color.setRGB(1, 1, 1);
+        if (mat.color) mat.color.setScalar(HALL_BACKDROP_VALUE);
         if (mat.normalScale) mat.normalScale.set(cfg.colNormalScale, cfg.colNormalScale);
         mat.needsUpdate = true;
       }
@@ -3751,7 +3328,7 @@ export function initWizardChess() {
         mat.emissiveIntensity = 0.06;
         mat.roughness = cfg.roughness;
         mat.metalness = cfg.metalness;
-        if (mat.color) mat.color.setRGB(1, 1, 1);
+        if (mat.color) mat.color.setScalar(HALL_BACKDROP_VALUE);
         if ('envMapIntensity' in mat) mat.envMapIntensity = 0.36;
         if (mat.normalScale) mat.normalScale.set(cfg.normalScale, cfg.normalScale);
         mat.needsUpdate = true;
@@ -4516,8 +4093,8 @@ export function initWizardChess() {
     function getSpectatorPose(side, tPortrait) {
       const s = side === 'b' ? -1 : 1;
       return {
-        pos: new THREE.Vector3(s * 1.25 * (1 - tPortrait), 4.6 + tPortrait * 2.6, s * (4.55 + tPortrait * 2.3)),
-        lookAt: new THREE.Vector3(0, 0.55, s * (0.15 - tPortrait * 0.2))
+        pos: new THREE.Vector3(s * 0.6 * (1 - tPortrait), 5.0 + tPortrait * 2.2, s * (4.1 + tPortrait * 2.75)),
+        lookAt: new THREE.Vector3(0, 0.62, s * (0.12 - tPortrait * 0.17))
       };
     }
 
@@ -8317,11 +7894,6 @@ export function initWizardChess() {
           closeLobbyModal();
           return;
         }
-        if (document.getElementById('skin-shop-overlay')?.classList.contains('visible')) {
-          e.preventDefault();
-          closeSkinShopModal();
-          return;
-        }
         if (document.getElementById('game-selector-overlay')?.classList.contains('visible')) {
           e.preventDefault();
           closeGameSelectorModal();
@@ -10040,14 +9612,7 @@ export function initWizardChess() {
     document.getElementById('btn-quick-duel')?.addEventListener('click', () => {
       openLobbyModal();
     });
-    document.getElementById('btn-quick-skin')?.addEventListener('click', () => {
-      openSkinShopModal();
-    });
-    document.getElementById('btn-piece-skin')?.addEventListener('click', () => {
-      cyclePieceTheme();
-    });
     window.wizardSetPieceSkin = applyPieceTheme;
-    window.wizardCyclePieceSkin = cyclePieceTheme;
     document.getElementById('btn-cam-spectator')?.addEventListener('click', () => setCameraPreset('spectator'));
     document.getElementById('btn-cam-player')?.addEventListener('click', () => setCameraPreset('player'));
     document.getElementById('btn-cam-top')?.addEventListener('click', () => setCameraPreset('top'));
@@ -10447,183 +10012,6 @@ export function initWizardChess() {
     });
 
     // =========================================================================
-    // 3D Skin Boutique Modal & Multiplayer Skin Sync
-    // =========================================================================
-    let selectedBoutiqueSkinId = 'dong_son';
-
-    async function broadcastMultiplayerSkinChange(skinId) {
-      if (gameMode !== 'multi' || !roomCode) return;
-      const side = playerColor === 'b' ? 'b' : 'w';
-      const stRoom = getStaticRoom(roomCode);
-      if (stRoom) {
-        if (side === 'b') stRoom.blackSkin = skinId;
-        else stRoom.whiteSkin = skinId;
-        stRoom.updatedAt = Date.now();
-        saveAndBroadcastStaticRoom(stRoom);
-      }
-      await mpApiRequest(`/api/rooms/${roomCode}/skin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerToken, color: side, skinId })
-      });
-    }
-
-    function previewSkinShatterDemo(skinId) {
-      const theme = PIECE_THEMES[skinId] || PIECE_THEMES[currentPieceThemeId] || PIECE_THEMES.hogwarts;
-      const targetSide = gameMode === 'multi' ? (playerColor === 'b' ? 'b' : 'w') : 'both';
-      applyPieceTheme(theme.id, targetSide);
-      const centerPos = new THREE.Vector3(0, BOARD_SURFACE_Y + 0.14, 0);
-      spawnStoneShatter(centerPos, 'w', 'queen');
-      spawnSignatureCombatVFX('queen', 'finisher', centerPos, centerPos, 0, -1, 'w');
-      const centerAt = { x: 0, y: BOARD_SURFACE_Y, z: 0 };
-      wizardAudio.playStoneShatter(centerAt);
-      wizardAudio.playSignatureAttack('queen', 'finisher', centerAt);
-      renderFrame();
-    }
-
-    function syncSkinBoutiqueUI() {
-      const cards = document.querySelectorAll('[data-skin-id]');
-      cards.forEach((card) => {
-        const sid = card.getAttribute('data-skin-id') || 'hogwarts';
-        const unlocked = isSkinUnlocked(sid);
-        const isEquipped =
-          (gameMode === 'multi' ? (playerColor === 'b' ? activeSkinBlack : activeSkinWhite) : currentPieceThemeId) === sid;
-        card.classList.toggle('selected', sid === selectedBoutiqueSkinId);
-        card.classList.toggle('equipped', isEquipped);
-        card.classList.toggle('locked', !unlocked);
-        const statusEl = card.querySelector('.skin-card-status');
-        if (statusEl) {
-          if (isEquipped) {
-            statusEl.textContent = trialSkinId === sid && !unlockedSkins.includes(sid) ? '⚡ Đang Dùng Thử' : '✓ Đang Trang Bị';
-          } else if (unlocked) {
-            statusEl.textContent = 'Đã Mở Khóa';
-          } else {
-            statusEl.textContent = PIECE_THEMES[sid]?.priceLabel || 'Khóa';
-          }
-        }
-      });
-
-      const selTheme = PIECE_THEMES[selectedBoutiqueSkinId] || PIECE_THEMES.hogwarts;
-      const titleEl = document.getElementById('skin-detail-title');
-      const subEl = document.getElementById('skin-detail-subtitle');
-      const priceEl = document.getElementById('skin-detail-price');
-      const btnEquip = document.getElementById('btn-skin-equip');
-      const btnTrial = document.getElementById('btn-skin-trial');
-      const unlockBox = document.getElementById('skin-unlock-box');
-      if (titleEl) titleEl.textContent = selTheme.name;
-      if (subEl) subEl.textContent = selTheme.subtitle;
-      const unlocked = isSkinUnlocked(selTheme.id);
-      if (priceEl) {
-        priceEl.textContent = unlocked
-          ? trialSkinId === selTheme.id && !unlockedSkins.includes(selTheme.id)
-            ? 'Trạng thái: Đang dùng thử 1 ván'
-            : 'Trạng thái: Đã sở hữu vĩnh viễn'
-          : `Giá mở khóa: ${selTheme.priceLabel} (Kèm bàn cờ & hiệu ứng vỡ 3D riêng)`;
-      }
-      if (btnEquip) {
-        btnEquip.textContent = unlocked ? '✓ Trang Bị Bộ Cờ Này' : `🔓 Mở Khóa Ngay (${selTheme.priceLabel})`;
-      }
-      if (btnTrial) {
-        btnTrial.style.display = unlocked ? 'none' : 'inline-flex';
-      }
-      if (unlockBox) {
-        unlockBox.style.display = unlocked ? 'none' : 'flex';
-      }
-    }
-
-    function selectBoutiqueSkin(skinId, previewOnBoard = true) {
-      if (!PIECE_THEMES[skinId]) return;
-      selectedBoutiqueSkinId = skinId;
-      if (previewOnBoard) {
-        const targetSide = gameMode === 'multi' ? (playerColor === 'b' ? 'b' : 'w') : 'both';
-        applyPieceTheme(skinId, targetSide);
-      }
-      syncSkinBoutiqueUI();
-      renderFrame();
-    }
-
-    function openSkinShopModal() {
-      const overlay = document.getElementById('skin-shop-overlay');
-      if (!overlay) return;
-      selectedBoutiqueSkinId = currentPieceThemeId || 'dong_son';
-      overlay.classList.add('visible');
-      syncSkinBoutiqueUI();
-    }
-
-    function closeSkinShopModal() {
-      const overlay = document.getElementById('skin-shop-overlay');
-      if (!overlay) return;
-      overlay.classList.remove('visible');
-    }
-
-    document.getElementById('btn-skin-shop')?.addEventListener('click', () => {
-      openSkinShopModal();
-    });
-    document.getElementById('btn-skin-shop-close')?.addEventListener('click', () => {
-      closeSkinShopModal();
-    });
-    document.getElementById('skin-shop-overlay')?.addEventListener('click', (e) => {
-      if (e.target === e.currentTarget) {
-        closeSkinShopModal();
-      }
-    });
-    document.querySelectorAll('[data-skin-id]').forEach((card) => {
-      card.addEventListener('click', () => {
-        const sid = card.getAttribute('data-skin-id');
-        if (sid) selectBoutiqueSkin(sid, true);
-      });
-    });
-    document.getElementById('btn-skin-equip')?.addEventListener('click', () => {
-      const selTheme = PIECE_THEMES[selectedBoutiqueSkinId] || PIECE_THEMES.hogwarts;
-      if (!isSkinUnlocked(selTheme.id)) {
-        unlockSkinPermanently(selTheme.id);
-      }
-      const targetSide = gameMode === 'multi' ? (playerColor === 'b' ? 'b' : 'w') : 'both';
-      applyPieceTheme(selTheme.id, targetSide);
-      if (gameMode === 'multi') {
-        broadcastMultiplayerSkinChange(selTheme.id);
-      }
-      syncSkinBoutiqueUI();
-      const msgEl = document.getElementById('skin-shop-status-msg');
-      if (msgEl) {
-        msgEl.textContent = `✦ Đã trang bị bộ cờ "${selTheme.name}" lên Đại Điện Thánh Đường!`;
-      }
-    });
-    document.getElementById('btn-skin-trial')?.addEventListener('click', () => {
-      const selTheme = PIECE_THEMES[selectedBoutiqueSkinId] || PIECE_THEMES.hogwarts;
-      trialSkinId = selTheme.id;
-      const targetSide = gameMode === 'multi' ? (playerColor === 'b' ? 'b' : 'w') : 'both';
-      applyPieceTheme(selTheme.id, targetSide);
-      if (gameMode === 'multi') {
-        broadcastMultiplayerSkinChange(selTheme.id);
-      }
-      syncSkinBoutiqueUI();
-      const msgEl = document.getElementById('skin-shop-status-msg');
-      if (msgEl) {
-        msgEl.textContent = `⚡ Đang dùng thử miễn phí bộ cờ "${selTheme.name}" trên bàn cờ 3D!`;
-      }
-    });
-    document.getElementById('btn-skin-shatter')?.addEventListener('click', () => {
-      previewSkinShatterDemo(selectedBoutiqueSkinId);
-      const msgEl = document.getElementById('skin-shop-status-msg');
-      if (msgEl) {
-        msgEl.textContent = `💥 Đã kích hoạt hiệu ứng nổ mảnh vỡ 3D của bộ "${PIECE_THEMES[selectedBoutiqueSkinId]?.name || ''}"!`;
-      }
-    });
-    document.getElementById('btn-skin-unlock-all')?.addEventListener('click', () => {
-      for (const sid of PIECE_THEME_ORDER) {
-        unlockSkinPermanently(sid);
-      }
-      const targetSide = gameMode === 'multi' ? (playerColor === 'b' ? 'b' : 'w') : 'both';
-      applyPieceTheme(selectedBoutiqueSkinId, targetSide);
-      syncSkinBoutiqueUI();
-      const msgEl = document.getElementById('skin-shop-status-msg');
-      if (msgEl) {
-        msgEl.textContent = '👑 Đã mở khóa toàn bộ 8 Tuyệt Tác Bộ Cờ 3D (Royal Collector Pass)!';
-      }
-    });
-
-    // =========================================================================
     // Programmatic API for Automated Verification & Camera Inspection
     // =========================================================================
     window.wizardChess = {
@@ -10652,6 +10040,43 @@ export function initWizardChess() {
       setPieceLabelMode,
       cyclePieceLabelMode,
       getPieceLabelMode: () => pieceLabelMode,
+      getSquareScreenPoint: (r, c) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const v = new THREE.Vector3((c - 3.5) * BOARD_SQ_SIZE, BOARD_SURFACE_Y, (r - 3.5) * BOARD_SQ_SIZE).project(camera);
+        return {
+          x: rect.left + (v.x + 1) * 0.5 * rect.width,
+          y: rect.top + (-v.y + 1) * 0.5 * rect.height
+        };
+      },
+      // Measurement aid: draws only the piece bodies, flat white on black, so a screenshot is a per-pixel piece mask.
+      setPieceMaskView: (on) => {
+        if (Boolean(on) === Boolean(pieceMaskViewState)) return Boolean(on);
+        if (!on) {
+          for (const [o, visible] of pieceMaskViewState.visibility) o.visible = visible;
+          scene.background = pieceMaskViewState.background;
+          scene.overrideMaterial = null;
+          pieceMaskViewState = null;
+          return false;
+        }
+        const roots = new Set();
+        for (const row of boardState) for (const p of row) if (p && p.mesh) roots.add(p.mesh);
+        const visibility = new Map();
+        for (const o of scene.children) {
+          visibility.set(o, o.visible);
+          if (!roots.has(o)) o.visible = false;
+        }
+        for (const root of roots) {
+          const ring = root.getObjectByName('PiecePedestalRing');
+          if (ring) {
+            visibility.set(ring, ring.visible);
+            ring.visible = false;
+          }
+        }
+        pieceMaskViewState = { visibility, background: scene.background };
+        scene.background = new THREE.Color(0x000000);
+        scene.overrideMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+        return true;
+      },
       getPieceScreenPoint: (r, c) => {
         const p = boardState[r]?.[c];
         if (!p || !p.mesh) return null;
@@ -10659,9 +10084,12 @@ export function initWizardChess() {
         const roleScale = ROLE_SCALE_MULTIPLIERS[p.type] || 1.0;
         const midY = p.mesh.position.y + (PIECE_HEIGHTS[p.type] || 0.38) * roleScale * 0.5;
         const v = new THREE.Vector3(p.mesh.position.x, midY, p.mesh.position.z).project(camera);
+        const base = p.mesh.position.clone().project(camera);
         return {
           x: rect.left + (v.x + 1) * 0.5 * rect.width,
-          y: rect.top + (-v.y + 1) * 0.5 * rect.height
+          y: rect.top + (-v.y + 1) * 0.5 * rect.height,
+          baseX: rect.left + (base.x + 1) * 0.5 * rect.width,
+          baseY: rect.top + (-base.y + 1) * 0.5 * rect.height
         };
       },
       inspectSquare: (r, c) => {
@@ -10711,14 +10139,8 @@ export function initWizardChess() {
         };
       },
       setPieceTheme: applyPieceTheme,
-      cyclePieceTheme,
       getPieceTheme: () => currentPieceThemeId,
       getActiveSkins: () => ({ white: activeSkinWhite, black: activeSkinBlack }),
-      openSkinShopModal,
-      closeSkinShopModal,
-      unlockSkinPermanently,
-      isSkinUnlocked,
-      previewSkinShatterDemo,
       setCameraPreset,
       setCameraLocked,
       isCameraLocked: () => isCameraLocked,
