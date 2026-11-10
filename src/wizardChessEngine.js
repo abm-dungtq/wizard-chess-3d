@@ -2866,17 +2866,68 @@ export function initWizardChess() {
       return gameVariant === 'xiangqi' ? xiangqiSquareMeshes : boardSquareMeshes;
     }
 
+    const XIANGQI_FRAME_WOOD_TINT = 0x6a3626;
+    const XIANGQI_LINE_HEX = 0x2a160c;
+
+    // Planks of honey-coloured wood with a straight grain, drawn once. The sequence is seeded so the board looks the same on every load.
+    function makeXiangqiWoodTexture() {
+      const size = 1024;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      let seed = 7919;
+      const rand = () => {
+        seed = (seed * 16807) % 2147483647;
+        return seed / 2147483647;
+      };
+      if (ctx) {
+        const planks = 6;
+        const plankW = size / planks;
+        for (let i = 0; i < planks; i++) {
+          const shade = 0.93 + rand() * 0.14;
+          ctx.fillStyle = `rgb(${Math.round(126 * shade)}, ${Math.round(90 * shade)}, ${Math.round(50 * shade)})`;
+          ctx.fillRect(i * plankW, 0, plankW + 1, size);
+          for (let g = 0; g < 70; g++) {
+            const x = i * plankW + rand() * plankW;
+            const drift = (rand() - 0.5) * 14;
+            ctx.strokeStyle = rand() < 0.6 ? `rgba(70, 40, 16, ${0.05 + rand() * 0.13})` : `rgba(214, 170, 108, ${0.04 + rand() * 0.1})`;
+            ctx.lineWidth = 0.6 + rand() * 1.8;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.bezierCurveTo(x + drift, size * 0.33, x - drift, size * 0.66, x + drift * 0.5, size);
+            ctx.stroke();
+          }
+          ctx.fillStyle = 'rgba(48, 26, 10, 0.5)';
+          ctx.fillRect(i * plankW - 1, 0, 2, size);
+        }
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = 8;
+      return tex;
+    }
+
     function buildXiangqiBoardGrid() {
       const boardW = 8 * XIANGQI_SQ_SIZE; // 3.04m across 9 files (c=0..8)
       const boardD = 9 * XIANGQI_SQ_SIZE; // 3.42m across 10 ranks (r=0..9)
       const slabPad = 0.24;
       const slabH = 0.036;
 
-      // 1. Imperial Obsidian-Jade Recessed Tablet Slab
+      // 1. Honey-wood playing surface, a dark rosewood frame, and lines burnt into the wood
+      const woodTex = makeXiangqiWoodTexture();
+      const xiangqiWoodMat = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.66, metalness: 0 });
+      const xiangqiFrameMat = new THREE.MeshStandardMaterial({
+        map: woodTex,
+        color: XIANGQI_FRAME_WOOD_TINT,
+        roughness: 0.58,
+        metalness: 0
+      });
+      const xiangqiLineMat = new THREE.MeshStandardMaterial({ color: XIANGQI_LINE_HEX, roughness: 0.85, metalness: 0 });
       const slabGeo = new THREE.BoxGeometry(boardW + slabPad * 2, slabH, boardD + slabPad * 2);
       slabGeo.computeBoundingBox();
       slabGeo.computeBoundingSphere();
-      const slabMesh = new THREE.Mesh(slabGeo, sanctumDarkSqMat);
+      const slabMesh = new THREE.Mesh(slabGeo, xiangqiWoodMat);
       slabMesh.position.set(0, BOARD_SURFACE_Y - slabH * 0.5, 0);
       slabMesh.receiveShadow = true;
       slabMesh.raycast = () => {};
@@ -2884,29 +2935,49 @@ export function initWizardChess() {
       slabMesh.matrixAutoUpdate = false;
       xiangqiBoardDeckGroup.add(slabMesh);
 
-      // Outer Golden Imperial Frame around the 9x10 Tablet
+      // Rosewood frame around the 9x10 surface, with a thin bronze inlay on its inner edge
       const halfW = boardW * 0.5 + slabPad;
       const halfD = boardD * 0.5 + slabPad;
-      const rimW = 0.052;
+      const frameW = 0.13;
+      const frameH = 0.07;
+      const rimW = 0.03;
       const rimH = 0.044;
-      const hRimGeo = new THREE.BoxGeometry(halfW * 2 + rimW * 2, rimH, rimW);
-      const vRimGeo = new THREE.BoxGeometry(rimW, rimH, halfD * 2);
+      const hFrameGeo = new THREE.BoxGeometry(halfW * 2 + frameW * 2, frameH, frameW);
+      const vFrameGeo = new THREE.BoxGeometry(frameW, frameH, halfD * 2);
+      const outerW = halfW + frameW;
+      const outerD = halfD + frameW;
+      const hRimGeo = new THREE.BoxGeometry(outerW * 2 + rimW * 2, rimH, rimW);
+      const vRimGeo = new THREE.BoxGeometry(rimW, rimH, outerD * 2);
+      const inlayW = 0.012;
+      const hInlayGeo = new THREE.BoxGeometry(halfW * 2 - inlayW * 2, 0.004, inlayW);
+      const vInlayGeo = new THREE.BoxGeometry(inlayW, 0.004, halfD * 2 - inlayW * 2);
       for (const s of [-1, 1]) {
+        const hFrame = new THREE.Mesh(hFrameGeo, xiangqiFrameMat);
+        hFrame.position.set(0, BOARD_SURFACE_Y - frameH * 0.42, s * (halfD + frameW * 0.5));
+        const vFrame = new THREE.Mesh(vFrameGeo, xiangqiFrameMat);
+        vFrame.position.set(s * (halfW + frameW * 0.5), BOARD_SURFACE_Y - frameH * 0.42, 0);
         const hBar = new THREE.Mesh(hRimGeo, boardGoldTrimMat);
-        hBar.position.set(0, BOARD_SURFACE_Y - rimH * 0.42, s * (halfD + rimW * 0.5));
-        hBar.receiveShadow = true;
-        hBar.raycast = () => {};
-        hBar.updateMatrix();
-        hBar.matrixAutoUpdate = false;
-        xiangqiBoardDeckGroup.add(hBar);
-
+        hBar.position.set(0, BOARD_SURFACE_Y - rimH * 0.5, s * (outerD + rimW * 0.5));
         const vBar = new THREE.Mesh(vRimGeo, boardGoldTrimMat);
-        vBar.position.set(s * (halfW + rimW * 0.5), BOARD_SURFACE_Y - rimH * 0.42, 0);
-        vBar.receiveShadow = true;
-        vBar.raycast = () => {};
-        vBar.updateMatrix();
-        vBar.matrixAutoUpdate = false;
-        xiangqiBoardDeckGroup.add(vBar);
+        vBar.position.set(s * (outerW + rimW * 0.5), BOARD_SURFACE_Y - rimH * 0.5, 0);
+        for (const bar of [hFrame, vFrame, hBar, vBar]) {
+          bar.receiveShadow = true;
+          bar.raycast = () => {};
+          bar.updateMatrix();
+          bar.matrixAutoUpdate = false;
+          xiangqiBoardDeckGroup.add(bar);
+        }
+
+        const hInlay = new THREE.Mesh(hInlayGeo, boardGoldTrimMat);
+        hInlay.position.set(0, BOARD_SURFACE_Y + 0.002, s * (halfD - inlayW));
+        const vInlay = new THREE.Mesh(vInlayGeo, boardGoldTrimMat);
+        vInlay.position.set(s * (halfW - inlayW), BOARD_SURFACE_Y + 0.002, 0);
+        for (const inlay of [hInlay, vInlay]) {
+          inlay.raycast = () => {};
+          inlay.updateMatrix();
+          inlay.matrixAutoUpdate = false;
+          xiangqiBoardDeckGroup.add(inlay);
+        }
       }
 
       // 2. Chu River — Han Border (楚河 — 漢界 / SỞ HÀ — HÁN GIỚI) between r=4 and r=5
@@ -2916,33 +2987,35 @@ export function initWizardChess() {
       const rCtx = riverCanv.getContext('2d');
       if (rCtx) {
         const grad = rCtx.createLinearGradient(0, 0, 0, 192);
-        grad.addColorStop(0, 'rgba(8, 28, 36, 0.92)');
-        grad.addColorStop(0.5, 'rgba(12, 46, 56, 0.96)');
-        grad.addColorStop(1, 'rgba(8, 28, 36, 0.92)');
+        // A walnut stain over the same wood, so the river is part of the board and not a banner on it.
+        grad.addColorStop(0, 'rgba(46, 24, 12, 0.62)');
+        grad.addColorStop(0.5, 'rgba(38, 19, 9, 0.74)');
+        grad.addColorStop(1, 'rgba(46, 24, 12, 0.62)');
         rCtx.fillStyle = grad;
         rCtx.fillRect(0, 0, 1024, 192);
 
-        rCtx.strokeStyle = 'rgba(212, 175, 55, 0.45)';
+        rCtx.strokeStyle = 'rgba(198, 152, 84, 0.5)';
         rCtx.lineWidth = 3;
         rCtx.strokeRect(6, 6, 1012, 180);
 
-        rCtx.fillStyle = 'rgba(245, 215, 110, 0.92)';
+        rCtx.fillStyle = 'rgba(226, 186, 112, 0.95)';
         rCtx.font = 'bold 74px "Noto Serif SC", "PingFang SC", "Georgia", serif';
         rCtx.textAlign = 'center';
         rCtx.textBaseline = 'middle';
         rCtx.fillText('楚   河', 256, 86);
         rCtx.fillText('漢   界', 768, 86);
 
-        rCtx.fillStyle = 'rgba(212, 175, 55, 0.72)';
+        rCtx.fillStyle = 'rgba(206, 164, 96, 0.8)';
         rCtx.font = '600 20px "Cinzel", "Georgia", serif';
         rCtx.fillText('✦   SỞ HÀ  —  HÁN GIỚI   ✦', 512, 152);
       }
       const riverTex = new THREE.CanvasTexture(riverCanv);
+      riverTex.colorSpace = THREE.SRGBColorSpace;
       riverTex.needsUpdate = true;
       const riverMat = new THREE.MeshBasicMaterial({
         map: riverTex,
         transparent: true,
-        opacity: 0.94,
+        opacity: 1,
         depthWrite: false
       });
       const riverGeo = new THREE.PlaneGeometry(boardW - 0.012, XIANGQI_SQ_SIZE - 0.012);
@@ -2957,7 +3030,20 @@ export function initWizardChess() {
       // 3. 10 Horizontal Rank Lines (r=0..9) & 9 Vertical File Lines (c=0..8)
       const lineThick = 0.011;
       const lineH = 0.005;
-      const rankLineGeo = new THREE.BoxGeometry(boardW + lineThick, lineH, lineThick);
+      const inlayThick = 0.0035;
+      // Every line is a burnt groove with a thin bronze inlay along its centre.
+      const addGroove = (inlayMesh, grooveGeo) => {
+        const groove = new THREE.Mesh(grooveGeo, xiangqiLineMat);
+        groove.position.copy(inlayMesh.position);
+        groove.position.y -= 0.0006;
+        groove.rotation.copy(inlayMesh.rotation);
+        groove.raycast = () => {};
+        groove.updateMatrix();
+        groove.matrixAutoUpdate = false;
+        xiangqiBoardDeckGroup.add(groove);
+      };
+      const rankGrooveGeo = new THREE.BoxGeometry(boardW + lineThick, lineH, lineThick);
+      const rankLineGeo = new THREE.BoxGeometry(boardW + lineThick, lineH, inlayThick);
       for (let r = 0; r < 10; r++) {
         const z = (r - 4.5) * XIANGQI_SQ_SIZE;
         const rLine = new THREE.Mesh(rankLineGeo, boardGoldTrimMat);
@@ -2966,10 +3052,13 @@ export function initWizardChess() {
         rLine.updateMatrix();
         rLine.matrixAutoUpdate = false;
         xiangqiBoardDeckGroup.add(rLine);
+        addGroove(rLine, rankGrooveGeo);
       }
 
-      const fullFileGeo = new THREE.BoxGeometry(lineThick, lineH, boardD + lineThick);
-      const halfFileGeo = new THREE.BoxGeometry(lineThick, lineH, 4 * XIANGQI_SQ_SIZE + lineThick);
+      const fullFileGrooveGeo = new THREE.BoxGeometry(lineThick, lineH, boardD + lineThick);
+      const halfFileGrooveGeo = new THREE.BoxGeometry(lineThick, lineH, 4 * XIANGQI_SQ_SIZE + lineThick);
+      const fullFileGeo = new THREE.BoxGeometry(inlayThick, lineH, boardD + lineThick);
+      const halfFileGeo = new THREE.BoxGeometry(inlayThick, lineH, 4 * XIANGQI_SQ_SIZE + lineThick);
       for (let c = 0; c < 9; c++) {
         const x = (c - 4.0) * XIANGQI_SQ_SIZE;
         if (c === 0 || c === 8) {
@@ -2979,6 +3068,7 @@ export function initWizardChess() {
           fLine.updateMatrix();
           fLine.matrixAutoUpdate = false;
           xiangqiBoardDeckGroup.add(fLine);
+          addGroove(fLine, fullFileGrooveGeo);
         } else {
           for (const bankSign of [-1, 1]) {
             const hLine = new THREE.Mesh(halfFileGeo, boardGoldTrimMat);
@@ -2987,13 +3077,15 @@ export function initWizardChess() {
             hLine.updateMatrix();
             hLine.matrixAutoUpdate = false;
             xiangqiBoardDeckGroup.add(hLine);
+            addGroove(hLine, halfFileGrooveGeo);
           }
         }
       }
 
       // 4. Two 3x3 Nine Palaces (Cửu Cung: c=3..5, r=0..2 & r=7..9) X-Diagonals
       const diagLen = 2 * Math.SQRT2 * XIANGQI_SQ_SIZE;
-      const diagGeo = new THREE.BoxGeometry(lineThick * 0.9, lineH, diagLen);
+      const diagGrooveGeo = new THREE.BoxGeometry(lineThick * 0.9, lineH, diagLen);
+      const diagGeo = new THREE.BoxGeometry(inlayThick, lineH, diagLen);
       for (const palaceZ of [-3.5 * XIANGQI_SQ_SIZE, 3.5 * XIANGQI_SQ_SIZE]) {
         for (const rotSign of [-1, 1]) {
           const dMesh = new THREE.Mesh(diagGeo, boardGoldTrimMat);
@@ -3003,6 +3095,7 @@ export function initWizardChess() {
           dMesh.updateMatrix();
           dMesh.matrixAutoUpdate = false;
           xiangqiBoardDeckGroup.add(dMesh);
+          addGroove(dMesh, diagGrooveGeo);
         }
       }
 
@@ -3045,7 +3138,7 @@ export function initWizardChess() {
           xiangqiBoardDeckGroup.add(padMesh);
           xiangqiSquareMeshes.push(padMesh);
 
-          const studMesh = new THREE.Mesh(nodeStudGeo, boardGoldTrimMat);
+          const studMesh = new THREE.Mesh(nodeStudGeo, xiangqiLineMat);
           studMesh.position.set(ix, BOARD_SURFACE_Y + 0.0025, iz);
           studMesh.raycast = () => {};
           studMesh.updateMatrix();
