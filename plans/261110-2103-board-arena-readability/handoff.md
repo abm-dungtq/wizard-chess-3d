@@ -5,7 +5,7 @@ Date: 2026-11-10 (updated after a second session the same day). For a fresh sess
 ## Where things are
 
 - Worktree: `/Volumes/2/wizard-chess-3d/.claude/worktrees/redesign-3d-chess-pieces-bf8f22`
-- Branch: `claude/board-arena-readability`, cut from `main` at `87af901`. **Nothing is committed.** The deletion of `public/assets/glb/sets/` is staged (`git rm`); everything else is unstaged or untracked.
+- Branch: `claude/board-arena-readability`, cut from `main` at `87af901`. Two commits (`18a4a0b`, `47666e9`); the effects work of the third session is uncommitted. Nothing is pushed.
 - Production (`chess.tqd.me`, `chess.tqd.io.vn`) still runs `main`: 12 themes and the skin shop. Nothing from this branch is deployed.
 - Deploy warning: `npm run deploy` goes to production. `wrangler deploy --env staging` after a build also deployed production once; do not rely on that flag.
 
@@ -60,6 +60,10 @@ Frame time on this branch: p95 17.3 to 17.6 ms (`ultra checkmate p95`, three run
 - **Fourth pass, uneven glare (user request).** One corner of the table was brighter than the others: the lower left from White's seat (old rim light) and the lower left from Black's seat (key light). Cause: each directional light has a mirror point on the table top, at `camera_xz + (camera_y - 0.75) * light_xz / light_y`; when that point lands on the table, the gold rails and piece tops around it shine and bloom. The three lights were moved so the point is off the 5 m apron for both seats: key `(5.0, 8.5, 1.5)`, rim `(0.6, 3.2, -8.5)`, south fill `(4.2, 4.4, 7.5)`. Rim and fill went from 0.80 to 1.10 to keep the fronts of the pieces lit, and the squares to 0.152 / 0.08. Shadows now fall sideways (toward the A file) instead of back-left. Current numbers (median / min): white on light 2.28 / 1.93, white on dark 3.99 / 3.37, black on light 5.11 / 4.85, black on dark 2.87 / 2.39, light against dark 1.76. Evidence: `visuals/final-even-light-white-and-black-side.jpg`. Keep the mirror-point rule in mind before moving any light or the spectator camera.
 - Checked by eye: black-side camera, xiangqi, portrait 390x844, landscape 844x390, tablet 1024x1366 (`visuals/final-portrait-tablet-blackside.jpg`, `visuals/readability-final-hogwarts.png`).
 - Checks: `npm test` 32 pass, lint clean, build succeeds, `ultra checkmate p95` passes, `e2e/game-smoke.spec.ts` 15 pass and 1 skipped, all on the final state.
+
+### Third session (2026-11-10, night): move, capture, shatter and check effects
+
+The readability work is committed (`18a4a0b`, `47666e9`). On top of it, uncommitted: the effect layer `src/pieceEffects.js` and its wiring. Decisions, what was built, what was left out and the checks are in `plans/reports/brainstorm-261110-2207-move-attack-shatter-check-effects.md`, section "Decisions and outcome". Next, by user decision: the same overhaul for xiangqi (characters, board, movement, attack, shatter, check). The effect layer already runs in xiangqi without changes (ribbon, landing, chunks, check line, ring, flinch: the general is type `king`, and `PIECE_EFFECT_WEIGHTS` covers cannon, elephant and advisor); see `visuals/xiangqi-baseline-effects.jpg` and `visuals/xiangqi-baseline-start.jpg`. What xiangqi still lacks is the readability pass chess had: the pieces are small on the 9x10 grid, the red side's elephants are green and the black side mixes orange and cyan, and the board is one flat grey slab. `e2e/board-readability.spec.ts` samples 8x8 squares and does not measure xiangqi yet.
 
 ## How to measure
 
