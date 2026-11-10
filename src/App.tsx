@@ -259,7 +259,7 @@ export default function App() {
           </div>
 
           <div className="mobile-sheet-header">
-            <span className="mobile-sheet-title">⚙️ Bảng Điều Khiển Gọn</span>
+            <span className="mobile-sheet-title">⚙️ Menu</span>
             <button
               type="button"
               className="mobile-sheet-close"
@@ -303,10 +303,28 @@ export default function App() {
           </div>
 
           <div className="mobile-sheet-section-label">
-            <span>1. Độ Khó AI (Đấu Với Máy)</span>
-            <span className="mobile-sheet-section-sub">Tách riêng 3 cấp độ</span>
+            <span>Ván Đấu</span>
           </div>
-
+          <button
+            className="hud-btn"
+            id="btn-reset"
+            title="Bắt đầu ván cờ mới"
+            onClick={() => setMobileSheetOpen(false)}
+          >
+            🆕 Ván Mới
+          </button>
+          <button
+            className="hud-btn"
+            id="btn-undo"
+            title="Đi lại nước vừa đi (Undo)"
+            onClick={() => setMobileSheetOpen(false)}
+          >
+            ↩ Đi Lại
+          </button>
+          <div className="mobile-sheet-section-label">
+            <span>Đấu Với Máy</span>
+            <span className="mobile-sheet-section-sub">Độ khó của máy</span>
+          </div>
           <button
             type="button"
             className="hud-btn ai-diff-tier-btn"
@@ -331,7 +349,6 @@ export default function App() {
           >
             👑 Khó
           </button>
-
           <button
             className="hud-btn"
             id="btn-side-toggle"
@@ -348,13 +365,9 @@ export default function App() {
           >
             🤖 Máy Đi Ngay
           </button>
-
-          <div className="hud-divider" aria-hidden="true"></div>
           <div className="mobile-sheet-section-label">
-            <span>2. Chơi 2 Người &amp; Ván Đấu</span>
-            <span className="mobile-sheet-section-sub">Cùng máy hoặc Phòng Online</span>
+            <span>Hai Người</span>
           </div>
-
           <button
             type="button"
             className="hud-btn"
@@ -373,43 +386,16 @@ export default function App() {
           >
             🌐 Phòng 2 Người Online
           </button>
-          <button
-            className="hud-btn"
-            id="btn-undo"
-            title="Đi lại nước vừa đi (Undo)"
-            onClick={() => setMobileSheetOpen(false)}
-          >
-            ↩ Đi Lại
-          </button>
-          <button
-            className="hud-btn"
-            id="btn-reset"
-            title="Bắt đầu ván cờ mới"
-            onClick={() => setMobileSheetOpen(false)}
-          >
-            🆕 Ván Mới
-          </button>
-
-          <div className="hud-divider" aria-hidden="true"></div>
           <div className="mobile-sheet-section-label">
-            <span>3. Góc Nhìn Camera &amp; Giao Diện</span>
-            <span className="mobile-sheet-section-sub">Khóa cố định hoặc xoay 3D</span>
+            <span>Góc Nhìn</span>
+            <span className="mobile-sheet-section-sub">Bấm lại một góc để lật Trắng / Đen</span>
           </div>
-
           <button
             className="hud-btn active"
             id="btn-cam-lock"
             title="Chuyển đổi giữa Khóa Camera Cố Định (chống xoay loạn) và Camera 3D Tự Do"
           >
             🔒 Khóa Cam
-          </button>
-          <button
-            type="button"
-            className="hud-btn active"
-            id="btn-piece-labels"
-            title="Chuyển chế độ hiển thị Tên Quân Cờ trên đầu: Thông Minh (Vua, Hậu, Xe, Tượng, Mã) • Tất Cả (32 Quân) • Khi Chạm"
-          >
-            🏷️ Tên Quân: Thông Minh
           </button>
           <button
             className="hud-btn active"
@@ -423,14 +409,14 @@ export default function App() {
             id="btn-cam-player"
             title="Góc nhìn Người Chơi (Bấm lần nữa để lật Trắng / Đen)"
           >
-            Góc 3D Chính
+            Góc Chính
           </button>
           <button
             className="hud-btn"
             id="btn-cam-top"
             title="Góc nhìn Từ Trên Xuống (Bấm lần nữa để lật Trắng / Đen)"
           >
-            Từ Trên Xuống
+            Từ Trên
           </button>
           <button
             className="hud-btn"
@@ -445,6 +431,17 @@ export default function App() {
             title="Góc nhìn Toàn Cảnh Đại Thánh Đường"
           >
             Toàn Cảnh
+          </button>
+          <div className="mobile-sheet-section-label">
+            <span>Hiển Thị &amp; Âm Thanh</span>
+          </div>
+          <button
+            type="button"
+            className="hud-btn active"
+            id="btn-piece-labels"
+            title="Chuyển chế độ hiển thị Tên Quân Cờ trên đầu: Thông Minh (Vua, Hậu, Xe, Tượng, Mã) • Tất Cả (32 Quân) • Khi Chạm"
+          >
+            🏷️ Tên Quân: Thông Minh
           </button>
           <button
             className="hud-btn"
@@ -464,20 +461,20 @@ export default function App() {
           </button>
           <button
             className="hud-btn"
+            id="btn-hide-ui"
+            title="Ẩn thanh điều khiển (Phím tắt: H)"
+            onClick={() => setMobileSheetOpen(false)}
+          >
+            👁 Ẩn Giao Diện [H]
+          </button>
+          <button
+            className="hud-btn"
             id="btn-quality-tier"
             type="button"
             aria-label="Quality tier"
             title="Chất lượng hình ảnh: Tự Động / Ultra / High / Base"
           >
             <span id="quality-tier-label">✨ Chất Lượng: Tự Động</span>
-          </button>
-          <button
-            className="hud-btn"
-            id="btn-hide-ui"
-            title="Ẩn thanh điều khiển (Phím tắt: H)"
-            onClick={() => setMobileSheetOpen(false)}
-          >
-            👁 Ẩn UI [H]
           </button>
 
           <div className="mobile-sheet-hint">
@@ -650,7 +647,7 @@ export default function App() {
           <div className="checkmate-ornament">✦ &nbsp; Sanctum 3D Grand Arena • chess.tqd.io.vn &nbsp; ✦</div>
           <div className="promotion-title" id="game-selector-title">Chọn Đấu Trường Cờ 3D</div>
           <div className="skin-shop-subtitle">
-            Khám phá 2 tuyệt tác sàn đấu 3D thời gian thực • Bạn có thể đổi môn cờ bất cứ lúc nào trên thanh điều khiển
+            Hai bàn cờ 3D, mỗi bàn có bộ quân và sàn đấu riêng • Đổi môn cờ bất cứ lúc nào trong Menu
           </div>
           <div className="checkmate-rule"></div>
 
@@ -662,7 +659,7 @@ export default function App() {
             >
               <div className="arena-preview-wrap">
                 <img
-                  src="/assets/demo-chess-arena.jpg?v=20261102_top"
+                  src="/assets/demo-chess-arena.jpg?v=20261110"
                   alt="Sàn đấu Cờ Vua 3D Đại Thánh Đường"
                   className="arena-demo-img"
                   draggable={false}
@@ -673,11 +670,10 @@ export default function App() {
               <div className="arena-card-body">
                 <div className="arena-card-title">♟️ Cờ Vua 3D — Đại Thánh Đường</div>
                 <div className="arena-card-desc">
-                  Bàn cờ 8×8 Cẩm Thạch &amp; Hắc Diện Thạch Mạ Vàng (3.52m) • 32 Tượng Thần Điêu Khắc Nổi • 8 Bộ Skin Thần Thoại • Hiệu Ứng Đập Vỡ Đá 3D
+                  Bàn 8×8 đá cẩm thạch viền vàng • 32 tượng điêu khắc • Mỗi quân có đòn đánh riêng, quân bị ăn vỡ thành từng mảnh
                 </div>
                 <div className="arena-feature-tags">
                   <span className="arena-tag">♔ Chuẩn FIDE</span>
-                  <span className="arena-tag">👑 8 Bộ Skin 3D</span>
                   <span className="arena-tag">🤖 AI 3 Cấp Độ</span>
                   <span className="arena-tag">⚔️ Đấu 2 Người</span>
                 </div>
@@ -694,7 +690,7 @@ export default function App() {
             >
               <div className="arena-preview-wrap">
                 <img
-                  src="/assets/demo-xiangqi-arena.jpg?v=20261102_top"
+                  src="/assets/demo-xiangqi-arena.jpg?v=20261110"
                   alt="Sàn đấu Cờ Tướng 3D Sở Hà Hán Giới"
                   className="arena-demo-img"
                   draggable={false}
@@ -705,10 +701,10 @@ export default function App() {
               <div className="arena-card-body">
                 <div className="arena-card-title">🀄 Cờ Tướng 3D — Hán Sở Phong Vân</div>
                 <div className="arena-card-desc">
-                  Bàn cờ 9×10 Ngọc Bích &amp; Đồng Đỏ • Sông <strong>楚河 — 漢界 (Sở Hà — Hán Giới)</strong> &amp; Cửu Cung • 32 Chiến Thần Chu Sa &amp; Hắc Ngọc Điêu Khắc Từ Đầu (Soái/Tướng, Sĩ, Tịnh/Tượng, Xe, Pháo, Mã, Binh/Tốt)
+                  Bàn gỗ 9×10 với sông <strong>楚河 — 漢界 (Sở Hà — Hán Giới)</strong> và Cửu Cung • 32 tượng sơn son và sơn đen viền đồng: Tướng, Sĩ, Tượng, Xe, Pháo, Mã, Tốt
                 </div>
                 <div className="arena-feature-tags">
-                  <span className="arena-tag">🔥 Pháo Kích Cầu Vồng</span>
+                  <span className="arena-tag">🔥 Pháo Bắn Qua Ngòi</span>
                   <span className="arena-tag">🐎 Báo Cản Mã / Mắt Tượng</span>
                   <span className="arena-tag">🤖 AI Cờ Tướng</span>
                   <span className="arena-tag">⚔️ Đấu 2 Người</span>

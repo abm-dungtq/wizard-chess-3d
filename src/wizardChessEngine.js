@@ -9734,7 +9734,7 @@ export function initWizardChess() {
     function updateCameraLockUI() {
       const btnLock = document.getElementById('btn-cam-lock');
       if (btnLock) {
-        btnLock.textContent = isCameraLocked ? '🔒 Khóa Cam' : '🎥 Cam 3D Tự Do';
+        btnLock.textContent = isCameraLocked ? '🔒 Khóa Cam' : '🎥 Cam Tự Do';
         btnLock.classList.toggle('active', isCameraLocked);
       }
       const btnQuickLock = document.getElementById('btn-quick-lock');

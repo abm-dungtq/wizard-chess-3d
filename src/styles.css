@@ -823,9 +823,23 @@ body.cinematic-ui-hidden #piece-inspect-card {
   grid-column: span 2;
 }
 
-/* Full-width row inside the consolidated menu: the default 3/4 camera */
-#btn-cam-spectator {
+/* The six camera buttons sit in two rows of three */
+#btn-cam-lock,
+#btn-cam-spectator,
+#btn-cam-player,
+#btn-cam-top,
+#btn-cam-side,
+#btn-cam-wide {
+  grid-column: span 2;
+}
+
+#btn-quality-tier {
   grid-column: span 6;
+}
+
+/* The selector has its own feedback button; the floating one would cover its title on phones */
+#game-selector-overlay.visible ~ #btn-feedback-fab {
+  display: none;
 }
 
 /* 2-column rows inside the consolidated menu (zero orphan buttons) */
@@ -835,15 +849,9 @@ body.cinematic-ui-hidden #piece-inspect-card {
 #btn-menu-2p-online,
 #btn-undo,
 #btn-reset,
-#btn-cam-lock,
 #btn-piece-labels,
-#btn-cam-player,
-#btn-cam-top,
-#btn-cam-side,
-#btn-cam-wide,
 #btn-audio-toggle,
 #btn-motion-level,
-#btn-quality-tier,
 #btn-hide-ui {
   grid-column: span 3;
 }
