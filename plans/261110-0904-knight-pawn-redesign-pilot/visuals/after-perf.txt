@@ -1,0 +1,13 @@
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./chessAI" without a file extension (src/xiangqiAI.ts:1:69). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+Running 1 test using 1 worker
+
+{"run":0,"count":357,"mean":11.77,"p50":10,"p95":22.1,"max":109.1,"over33":2,"currentActiveDpr":1.25,"qualityTier":"ultra","gpuRenderer":"ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)"}
+{"run":1,"count":353,"mean":11.9,"p50":10.5,"p95":22.9,"max":100.1,"over33":1,"currentActiveDpr":1.25,"qualityTier":"ultra","gpuRenderer":"ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)"}
+{"run":2,"count":352,"mean":11.94,"p50":11.2,"p95":22.5,"max":90.4,"over33":1,"currentActiveDpr":1.25,"qualityTier":"ultra","gpuRenderer":"ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)"}
+{"medianMean":11.9}
+  ✓  1 [chromium] › e2e/perf-budget.spec.ts:34:1 › ultra checkmate p95 (26.6s)
+
+  1 passed (28.8s)

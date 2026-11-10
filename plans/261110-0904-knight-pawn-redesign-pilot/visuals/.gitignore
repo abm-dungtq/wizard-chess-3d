@@ -1,0 +1,4 @@
+# Raw per-shot screenshots (about 350 MB) stay local; montages, comparisons and reports are tracked.
+before*.png
+after*.png
+wip*.png
