@@ -131,6 +131,7 @@ export default function App() {
 
   return (
     <>
+      <div id="check-vignette" aria-hidden="true" />
       <div id="loading-overlay">
         <div className="loader-title">Wizard Chess</div>
         <div className="loader-bar-wrap">
@@ -216,12 +217,21 @@ export default function App() {
 
           <button
             type="button"
-            className="hud-btn top-primary-btn skin-shop-trigger desktop-only-top-btn"
-            id="btn-skin-shop"
-            title="Mở Cửa Hàng Bộ Sưu Tập Quân Cờ 3D (8 Phong Cách Độc Bản &amp; Bàn Đấu Thánh Đường)"
-            onClick={() => setMobileSheetOpen(false)}
+            className="hud-btn top-primary-btn desktop-only-top-btn"
+            id="btn-top-cam"
+            title="Mở xoay 3D tự do hoặc khóa góc nhìn lại"
           >
-            👑 Skin 3D
+            🎥 Xoay 3D
+          </button>
+
+          <button
+            type="button"
+            className="hud-btn top-primary-btn desktop-only-top-btn"
+            id="btn-cam-home"
+            title="Đưa camera về góc 3/4 chuẩn"
+            hidden
+          >
+            ↺<span className="cam-home-label"> Về góc chuẩn</span>
           </button>
 
           <button
@@ -268,7 +278,7 @@ export default function App() {
           </div>
 
           <div className="mobile-sheet-header">
-            <span className="mobile-sheet-title">⚙️ Bảng Điều Khiển Gọn</span>
+            <span className="mobile-sheet-title">⚙️ Menu</span>
             <button
               type="button"
               className="mobile-sheet-close"
@@ -312,10 +322,28 @@ export default function App() {
           </div>
 
           <div className="mobile-sheet-section-label">
-            <span>1. Độ Khó AI (Đấu Với Máy)</span>
-            <span className="mobile-sheet-section-sub">Tách riêng 3 cấp độ</span>
+            <span>Ván Đấu</span>
           </div>
-
+          <button
+            className="hud-btn"
+            id="btn-reset"
+            title="Bắt đầu ván cờ mới"
+            onClick={() => setMobileSheetOpen(false)}
+          >
+            🆕 Ván Mới
+          </button>
+          <button
+            className="hud-btn"
+            id="btn-undo"
+            title="Đi lại nước vừa đi (Undo)"
+            onClick={() => setMobileSheetOpen(false)}
+          >
+            ↩ Đi Lại
+          </button>
+          <div className="mobile-sheet-section-label">
+            <span>Đấu Với Máy</span>
+            <span className="mobile-sheet-section-sub">Độ khó của máy</span>
+          </div>
           <button
             type="button"
             className="hud-btn ai-diff-tier-btn"
@@ -340,7 +368,6 @@ export default function App() {
           >
             👑 Khó
           </button>
-
           <button
             className="hud-btn"
             id="btn-side-toggle"
@@ -357,13 +384,9 @@ export default function App() {
           >
             🤖 Máy Đi Ngay
           </button>
-
-          <div className="hud-divider" aria-hidden="true"></div>
           <div className="mobile-sheet-section-label">
-            <span>2. Chơi 2 Người &amp; Ván Đấu</span>
-            <span className="mobile-sheet-section-sub">Cùng máy hoặc Phòng Online</span>
+            <span>Hai Người</span>
           </div>
-
           <button
             type="button"
             className="hud-btn"
@@ -382,50 +405,16 @@ export default function App() {
           >
             🌐 Phòng 2 Người Online
           </button>
-          <button
-            className="hud-btn"
-            id="btn-undo"
-            title="Đi lại nước vừa đi (Undo)"
-            onClick={() => setMobileSheetOpen(false)}
-          >
-            ↩ Đi Lại
-          </button>
-          <button
-            className="hud-btn"
-            id="btn-reset"
-            title="Bắt đầu ván cờ mới"
-            onClick={() => setMobileSheetOpen(false)}
-          >
-            🆕 Ván Mới
-          </button>
-
-          <div className="hud-divider" aria-hidden="true"></div>
           <div className="mobile-sheet-section-label">
-            <span>3. Góc Nhìn Camera &amp; Giao Diện</span>
-            <span className="mobile-sheet-section-sub">Khóa cố định hoặc xoay 3D</span>
+            <span>Góc Nhìn</span>
+            <span className="mobile-sheet-section-sub">Bấm lại một góc để lật Trắng / Đen</span>
           </div>
-
           <button
             className="hud-btn active"
             id="btn-cam-lock"
             title="Chuyển đổi giữa Khóa Camera Cố Định (chống xoay loạn) và Camera 3D Tự Do"
           >
             🔒 Khóa Cam
-          </button>
-          <button
-            type="button"
-            className="hud-btn active"
-            id="btn-piece-labels"
-            title="Chuyển chế độ hiển thị Tên Quân Cờ trên đầu: Thông Minh (Vua, Hậu, Xe, Tượng, Mã) • Tất Cả (32 Quân) • Khi Chạm"
-          >
-            🏷️ Tên Quân: Thông Minh
-          </button>
-          <button
-            className="hud-btn"
-            id="btn-piece-skin"
-            title="Đổi nhanh bộ cờ 3D (Đông Sơn, Shogun, Mecha 2099, Cửu U Lich, Valhalla, Pharaoh, Bauhaus, Cẩm Thạch)"
-          >
-            🎨 Skin: Cẩm Thạch
           </button>
           <button
             className="hud-btn active"
@@ -439,14 +428,14 @@ export default function App() {
             id="btn-cam-player"
             title="Góc nhìn Người Chơi (Bấm lần nữa để lật Trắng / Đen)"
           >
-            Góc 3D Chính
+            Góc Chính
           </button>
           <button
             className="hud-btn"
             id="btn-cam-top"
             title="Góc nhìn Từ Trên Xuống (Bấm lần nữa để lật Trắng / Đen)"
           >
-            Từ Trên Xuống
+            Từ Trên
           </button>
           <button
             className="hud-btn"
@@ -461,6 +450,17 @@ export default function App() {
             title="Góc nhìn Toàn Cảnh Đại Thánh Đường"
           >
             Toàn Cảnh
+          </button>
+          <div className="mobile-sheet-section-label">
+            <span>Hiển Thị &amp; Âm Thanh</span>
+          </div>
+          <button
+            type="button"
+            className="hud-btn active"
+            id="btn-piece-labels"
+            title="Chuyển chế độ hiển thị Tên Quân Cờ trên đầu: Thông Minh (Vua, Hậu, Xe, Tượng, Mã) • Tất Cả (32 Quân) • Khi Chạm"
+          >
+            🏷️ Tên Quân: Thông Minh
           </button>
           <button
             className="hud-btn"
@@ -480,20 +480,20 @@ export default function App() {
           </button>
           <button
             className="hud-btn"
+            id="btn-hide-ui"
+            title="Ẩn thanh điều khiển (Phím tắt: H)"
+            onClick={() => setMobileSheetOpen(false)}
+          >
+            👁 Ẩn Giao Diện [H]
+          </button>
+          <button
+            className="hud-btn"
             id="btn-quality-tier"
             type="button"
             aria-label="Quality tier"
             title="Chất lượng hình ảnh: Tự Động / Ultra / High / Base"
           >
             <span id="quality-tier-label">✨ Chất Lượng: Tự Động</span>
-          </button>
-          <button
-            className="hud-btn"
-            id="btn-hide-ui"
-            title="Ẩn thanh điều khiển (Phím tắt: H)"
-            onClick={() => setMobileSheetOpen(false)}
-          >
-            👁 Ẩn UI [H]
           </button>
 
           <div className="mobile-sheet-hint">
@@ -526,11 +526,11 @@ export default function App() {
           </button>
           <button
             type="button"
-            className="hud-btn mobile-dock-btn active"
+            className="hud-btn mobile-dock-btn"
             id="btn-quick-lock"
-            title="Khóa Camera Cố Định hoặc Mở Xoay 3D Tự Do"
+            title="Mở xoay 3D tự do hoặc khóa góc nhìn lại"
           >
-            🔒 Khóa
+            🎥 Xoay 3D
           </button>
           <button
             type="button"
@@ -558,12 +558,20 @@ export default function App() {
           </button>
           <button
             type="button"
-            className="hud-btn mobile-dock-btn skin-shop-trigger"
-            id="btn-quick-skin"
-            title="Mở Cửa Hàng Bộ Sưu Tập Quân Cờ 3D"
+            className="hud-btn mobile-dock-btn"
+            id="btn-quick-home"
+            title="Đưa camera về góc 3/4 chuẩn"
           >
-            👑 Skin 3D
+            ↺ Góc chuẩn
           </button>
+        </div>
+      </div>
+
+      <div id="cam-guide" role="dialog" aria-labelledby="cam-guide-text" hidden>
+        <p id="cam-guide-text"></p>
+        <div className="cam-guide-actions">
+          <button type="button" className="hud-btn active" id="btn-cam-guide-try">Thử ngay</button>
+          <button type="button" className="hud-btn" id="btn-cam-guide-later">Để sau</button>
         </div>
       </div>
 
@@ -663,155 +671,6 @@ export default function App() {
         </div>
       </div>
 
-      <div id="skin-shop-overlay" role="dialog" aria-modal="true" aria-labelledby="skin-shop-title">
-        <div className="promotion-modal skin-shop-card">
-          <div className="checkmate-ornament">✦ &nbsp; Sanctum Royal Armory &amp; 3D Skin Boutique &nbsp; ✦</div>
-          <div className="promotion-title" id="skin-shop-title">Bộ Sưu Tập Quân Cờ &amp; Đại Điện 3D</div>
-          <div className="skin-shop-subtitle">
-            Chọn bộ cờ để ngắm trực tiếp trên Đại Bàn Cờ 3.52m • Mỗi bộ đi kèm Phụ Kiện Vũ Khí 3D, Màu Đá Bàn Đấu &amp; Hiệu Ứng Nổ Vỡ riêng
-          </div>
-          <div className="checkmate-rule"></div>
-
-          <div className="skin-grid" id="skin-catalog-grid">
-            <button type="button" className="skin-item-card selected" data-skin-id="dong_son">
-              <div className="skin-tier-badge mythic">THẦN THOẠI VIỆT</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#e6c687' }}></span>
-                <span className="skin-swatch" style={{ background: '#12352a' }}></span>
-                <span className="skin-swatch" style={{ background: '#fbbf24' }}></span>
-              </div>
-              <div className="skin-card-name">Hào Khí Đông Sơn</div>
-              <div className="skin-card-desc">Trống Đồng Lạc Việt • Mũ Lông Công &amp; Rìu Chiến</div>
-              <div className="skin-card-status">199.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="shogun_yokai">
-              <div className="skin-tier-badge mythic">THẦN THOẠI</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#f5ebe1' }}></span>
-                <span className="skin-swatch" style={{ background: '#220910' }}></span>
-                <span className="skin-swatch" style={{ background: '#ef4444' }}></span>
-              </div>
-              <div className="skin-card-name">Đại Mạc Phủ Shogun</div>
-              <div className="skin-card-desc">Giáp Sơn Mài • Sừng Kabuto &amp; Cờ Lệnh Samurai</div>
-              <div className="skin-card-status">199.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="mecha_ronin">
-              <div className="skin-tier-badge mythic">CYBER MYTHIC</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#eef4fa' }}></span>
-                <span className="skin-swatch" style={{ background: '#0f172a' }}></span>
-                <span className="skin-swatch" style={{ background: '#00f5d4' }}></span>
-              </div>
-              <div className="skin-card-name">Cyberpunk Mecha 2099</div>
-              <div className="skin-card-desc">Cánh Phản Lực Titanium • Kính Visor &amp; Lõi Neon</div>
-              <div className="skin-card-status">199.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="abyssal_lich">
-              <div className="skin-tier-badge epic">SỬ THI</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#dad4c8' }}></span>
-                <span className="skin-swatch" style={{ background: '#0b0914' }}></span>
-                <span className="skin-swatch" style={{ background: '#10b981' }}></span>
-              </div>
-              <div className="skin-card-name">Cửu U Minh Giới</div>
-              <div className="skin-card-desc">Vương Miện Gai Tử Thần • Lõi Linh Hồn &amp; Lưỡi Hái</div>
-              <div className="skin-card-status">129.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="valhalla_valkyrie">
-              <div className="skin-tier-badge epic">SỬ THI</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#e2ecf5' }}></span>
-                <span className="skin-swatch" style={{ background: '#131c2b' }}></span>
-                <span className="skin-swatch" style={{ background: '#38bdf8' }}></span>
-              </div>
-              <div className="skin-card-name">Thánh Điện Valhalla</div>
-              <div className="skin-card-desc">Cánh Thiên Thần Valkyrie • Búa Thần &amp; Băng Tinh</div>
-              <div className="skin-card-status">129.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="pharaoh_anubis">
-              <div className="skin-tier-badge epic">SỬ THI</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#f5e8c7' }}></span>
-                <span className="skin-swatch" style={{ background: '#141b33' }}></span>
-                <span className="skin-swatch" style={{ background: '#fbbf24' }}></span>
-              </div>
-              <div className="skin-card-name">Vương Triều Pharaoh</div>
-              <div className="skin-card-desc">Đĩa Mặt Trời Thần Ra • Tai Anubis &amp; Kim Tự Tháp</div>
-              <div className="skin-card-status">129.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card" data-skin-id="bauhaus_imperial">
-              <div className="skin-tier-badge rare">HIẾM</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#f8fafc' }}></span>
-                <span className="skin-swatch" style={{ background: '#111318' }}></span>
-                <span className="skin-swatch" style={{ background: '#e11d48' }}></span>
-              </div>
-              <div className="skin-card-name">Bauhaus Đế Vương</div>
-              <div className="skin-card-desc">Sứ Trắng Minh Triều • Vòng Hào Quang Art Deco</div>
-              <div className="skin-card-status">69.000đ</div>
-            </button>
-
-            <button type="button" className="skin-item-card equipped" data-skin-id="hogwarts">
-              <div className="skin-tier-badge free">MẶC ĐỊNH</div>
-              <div className="skin-swatch-row">
-                <span className="skin-swatch" style={{ background: '#f2ece0' }}></span>
-                <span className="skin-swatch" style={{ background: '#181c26' }}></span>
-                <span className="skin-swatch" style={{ background: '#d4af37' }}></span>
-              </div>
-              <div className="skin-card-name">Thánh Đường Cổ Điển</div>
-              <div className="skin-card-desc">Cẩm Thạch Trắng &amp; Hắc Diện Thạch Mạ Vàng</div>
-              <div className="skin-card-status">✓ Đang Trang Bị</div>
-            </button>
-          </div>
-
-          <div className="skin-detail-panel">
-            <div className="skin-detail-info">
-              <div className="skin-detail-title" id="skin-detail-title">Hào Khí Đông Sơn</div>
-              <div className="skin-detail-subtitle" id="skin-detail-subtitle">
-                Trống Đồng Lạc Việt • Mũ Lông Công &amp; Rìu Chiến Cổ Loa
-              </div>
-              <div className="skin-detail-price" id="skin-detail-price">
-                Giá mở khóa: 199.000đ (Kèm bàn cờ &amp; hiệu ứng vỡ 3D riêng)
-              </div>
-            </div>
-            <div className="skin-detail-actions">
-              <button type="button" className="checkmate-btn" id="btn-skin-equip">
-                🔓 Mở Khóa Ngay (199.000đ)
-              </button>
-              <button type="button" className="checkmate-btn secondary" id="btn-skin-trial">
-                ⚡ Dùng Thử 1 Ván
-              </button>
-              <button type="button" className="checkmate-btn secondary" id="btn-skin-shatter">
-                💥 Xem Hiệu Ứng Nổ Vỡ
-              </button>
-            </div>
-          </div>
-
-          <div className="skin-unlock-banner" id="skin-unlock-box">
-            <span>🎁 <strong>Royal Collector Pass:</strong> Mở khóa trọn bộ 8 Phong Cách 3D Độc Bản + Đấu Trường Cổ Ngữ</span>
-            <button type="button" className="checkmate-btn" id="btn-skin-unlock-all">
-              👑 Mở Khóa Tất Cả (VIP Pass)
-            </button>
-          </div>
-
-          <div className="duel-status-msg" id="skin-shop-status-msg">
-            Mẹo: Khi đánh Phòng 2 Người Online, bộ Skin bạn trang bị sẽ hiển thị trực tiếp cho đối thủ chiêm ngưỡng!
-          </div>
-
-          <div className="checkmate-actions" style={{ marginTop: '10px' }}>
-            <button type="button" className="checkmate-btn secondary" id="btn-skin-shop-close">
-              Đóng Cửa Hàng &amp; Vào Trận
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div
         id="game-selector-overlay"
         className="visible"
@@ -823,7 +682,7 @@ export default function App() {
           <div className="checkmate-ornament">✦ &nbsp; Sanctum 3D Grand Arena • chess.tqd.io.vn &nbsp; ✦</div>
           <div className="promotion-title" id="game-selector-title">Chọn Đấu Trường Cờ 3D</div>
           <div className="skin-shop-subtitle">
-            Khám phá 2 tuyệt tác sàn đấu 3D thời gian thực • Bạn có thể đổi môn cờ bất cứ lúc nào trên thanh điều khiển
+            Hai bàn cờ 3D, mỗi bàn có bộ quân và sàn đấu riêng • Đổi môn cờ bất cứ lúc nào trong Menu
           </div>
           <div className="checkmate-rule"></div>
 
@@ -835,7 +694,7 @@ export default function App() {
             >
               <div className="arena-preview-wrap">
                 <img
-                  src="/assets/demo-chess-arena.jpg?v=20261102_top"
+                  src="/assets/demo-chess-arena.jpg?v=20261110"
                   alt="Sàn đấu Cờ Vua 3D Đại Thánh Đường"
                   className="arena-demo-img"
                   draggable={false}
@@ -846,11 +705,10 @@ export default function App() {
               <div className="arena-card-body">
                 <div className="arena-card-title">♟️ Cờ Vua 3D — Đại Thánh Đường</div>
                 <div className="arena-card-desc">
-                  Bàn cờ 8×8 Cẩm Thạch &amp; Hắc Diện Thạch Mạ Vàng (3.52m) • 32 Tượng Thần Điêu Khắc Nổi • 8 Bộ Skin Thần Thoại • Hiệu Ứng Đập Vỡ Đá 3D
+                  Bàn 8×8 đá cẩm thạch viền vàng • 32 tượng điêu khắc • Mỗi quân có đòn đánh riêng, quân bị ăn vỡ thành từng mảnh
                 </div>
                 <div className="arena-feature-tags">
                   <span className="arena-tag">♔ Chuẩn FIDE</span>
-                  <span className="arena-tag">👑 8 Bộ Skin 3D</span>
                   <span className="arena-tag">🤖 AI 3 Cấp Độ</span>
                   <span className="arena-tag">⚔️ Đấu 2 Người</span>
                 </div>
@@ -867,7 +725,7 @@ export default function App() {
             >
               <div className="arena-preview-wrap">
                 <img
-                  src="/assets/demo-xiangqi-arena.jpg?v=20261102_top"
+                  src="/assets/demo-xiangqi-arena.jpg?v=20261110"
                   alt="Sàn đấu Cờ Tướng 3D Sở Hà Hán Giới"
                   className="arena-demo-img"
                   draggable={false}
@@ -878,10 +736,10 @@ export default function App() {
               <div className="arena-card-body">
                 <div className="arena-card-title">🀄 Cờ Tướng 3D — Hán Sở Phong Vân</div>
                 <div className="arena-card-desc">
-                  Bàn cờ 9×10 Ngọc Bích &amp; Đồng Đỏ • Sông <strong>楚河 — 漢界 (Sở Hà — Hán Giới)</strong> &amp; Cửu Cung • 32 Chiến Thần Chu Sa &amp; Hắc Ngọc Điêu Khắc Từ Đầu (Soái/Tướng, Sĩ, Tịnh/Tượng, Xe, Pháo, Mã, Binh/Tốt)
+                  Bàn gỗ 9×10 với sông <strong>楚河 — 漢界 (Sở Hà — Hán Giới)</strong> và Cửu Cung • 32 tượng sơn son và sơn đen viền đồng: Tướng, Sĩ, Tượng, Xe, Pháo, Mã, Tốt
                 </div>
                 <div className="arena-feature-tags">
-                  <span className="arena-tag">🔥 Pháo Kích Cầu Vồng</span>
+                  <span className="arena-tag">🔥 Pháo Bắn Qua Ngòi</span>
                   <span className="arena-tag">🐎 Báo Cản Mã / Mắt Tượng</span>
                   <span className="arena-tag">🤖 AI Cờ Tướng</span>
                   <span className="arena-tag">⚔️ Đấu 2 Người</span>

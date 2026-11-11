@@ -643,6 +643,47 @@ body.cinematic-ui-hidden #piece-inspect-card {
   font-weight: 700;
 }
 
+#btn-cam-home[hidden],
+#cam-guide[hidden],
+#btn-cam-guide-later[hidden],
+body.cinematic-ui-hidden #cam-guide {
+  display: none;
+}
+
+/* Below 1360 px the dock has no room for the label once the status pill shows its longest text. */
+@media (max-width: 1359px) {
+  .cam-home-label {
+    display: none;
+  }
+}
+
+/* One-time 3D camera guide: at the right under the top dock on desktop (clear of the board and of a two-row dock), above the quick dock on phones. */
+#cam-guide {
+  position: fixed;
+  top: 112px;
+  right: 16px;
+  z-index: 26;
+  width: min(300px, calc(100vw - 24px));
+  padding: 12px 14px;
+  background: rgba(10, 13, 21, 0.92);
+  border: 1px solid rgba(212, 175, 55, 0.55);
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65);
+  color: var(--text, #f3ead2);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+#cam-guide p {
+  margin: 0 0 10px;
+}
+
+.cam-guide-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .mobile-only-restore-ui,
 .mobile-quick-dock {
   display: none;
@@ -823,10 +864,23 @@ body.cinematic-ui-hidden #piece-inspect-card {
   grid-column: span 2;
 }
 
-/* Full-width rows inside the consolidated menu: the skin banner and the default 3/4 camera */
-#btn-piece-skin,
-#btn-cam-spectator {
+/* The six camera buttons sit in two rows of three */
+#btn-cam-lock,
+#btn-cam-spectator,
+#btn-cam-player,
+#btn-cam-top,
+#btn-cam-side,
+#btn-cam-wide {
+  grid-column: span 2;
+}
+
+#btn-quality-tier {
   grid-column: span 6;
+}
+
+/* The selector has its own feedback button; the floating one would cover its title on phones */
+#game-selector-overlay.visible ~ #btn-feedback-fab {
+  display: none;
 }
 
 /* 2-column rows inside the consolidated menu (zero orphan buttons) */
@@ -836,15 +890,9 @@ body.cinematic-ui-hidden #piece-inspect-card {
 #btn-menu-2p-online,
 #btn-undo,
 #btn-reset,
-#btn-cam-lock,
 #btn-piece-labels,
-#btn-cam-player,
-#btn-cam-top,
-#btn-cam-side,
-#btn-cam-wide,
 #btn-audio-toggle,
 #btn-motion-level,
-#btn-quality-tier,
 #btn-hide-ui {
   grid-column: span 3;
 }
@@ -1104,6 +1152,14 @@ body.cinematic-ui-hidden #piece-inspect-card {
     pointer-events: none;
   }
 
+  #cam-guide {
+    top: auto;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+  }
+
   .mobile-quick-dock {
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -1145,8 +1201,7 @@ body.cinematic-ui-hidden #piece-inspect-card {
   }
 
   .promotion-modal,
-  .duel-room-card,
-  .skin-shop-card {
+  .duel-room-card {
     min-width: 0;
     width: calc(100vw - 20px);
     max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
@@ -1222,7 +1277,6 @@ body.cinematic-ui-hidden #piece-inspect-card {
 
   .promotion-modal,
   .duel-room-card,
-  .skin-shop-card,
   .checkmate-banner {
     min-width: 0;
     max-height: 88dvh;
@@ -1464,242 +1518,10 @@ body.cinematic-ui-hidden #piece-inspect-card {
   }
 }
 
-/* =========================================================================
-   3D Skin Boutique & Royal Armory Overlay
-   ========================================================================= */
-.hud-btn.skin-shop-trigger {
-  border-color: rgba(245, 215, 110, 0.68);
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.24) 0%, rgba(16, 20, 32, 0.90) 100%);
-  color: var(--gold-bright);
-  box-shadow: 0 0 14px rgba(212, 175, 55, 0.20);
-}
-
-.hud-btn.skin-shop-trigger:hover {
-  border-color: #fff6d1;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.38) 0%, rgba(22, 28, 44, 0.95) 100%);
-  box-shadow: 0 0 20px rgba(212, 175, 55, 0.36);
-}
-
-#skin-shop-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 35;
-  background: rgba(5, 7, 13, 0.62);
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.24s ease;
-}
-
-#skin-shop-overlay.visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.skin-shop-card {
-  width: min(860px, 95vw);
-  max-height: 90vh;
-  overflow-y: auto;
-  padding: 20px 24px 18px;
-  text-align: center;
-}
-
 .skin-shop-subtitle {
   font-size: 0.78rem;
   color: var(--muted);
   margin-top: 4px;
-}
-
-.skin-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin: 12px 0 14px;
-}
-
-.skin-item-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  padding: 11px 12px 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(212, 175, 55, 0.28);
-  background: rgba(16, 20, 32, 0.85);
-  color: var(--text);
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.skin-item-card:hover {
-  border-color: rgba(245, 215, 110, 0.72);
-  background: rgba(24, 30, 46, 0.94);
-  transform: translateY(-2px);
-}
-
-.skin-item-card.selected {
-  border-color: #f5d76e;
-  background: linear-gradient(180deg, rgba(212, 175, 55, 0.20) 0%, rgba(16, 20, 32, 0.95) 100%);
-  box-shadow: 0 0 18px rgba(212, 175, 55, 0.28);
-}
-
-.skin-item-card.equipped {
-  border-color: rgba(52, 211, 153, 0.75);
-}
-
-.skin-tier-badge {
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  padding: 2px 7px;
-  border-radius: 999px;
-  margin-bottom: 7px;
-  text-transform: uppercase;
-}
-
-.skin-tier-badge.mythic {
-  background: linear-gradient(90deg, rgba(245, 158, 11, 0.28), rgba(239, 68, 68, 0.28));
-  border: 1px solid rgba(251, 191, 36, 0.75);
-  color: #fde68a;
-}
-
-.skin-tier-badge.epic {
-  background: rgba(168, 85, 247, 0.24);
-  border: 1px solid rgba(192, 132, 252, 0.68);
-  color: #e9d5ff;
-}
-
-.skin-tier-badge.rare {
-  background: rgba(56, 189, 248, 0.20);
-  border: 1px solid rgba(56, 189, 248, 0.62);
-  color: #bae6fd;
-}
-
-.skin-tier-badge.free {
-  background: rgba(148, 163, 184, 0.18);
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  color: #cbd5e1;
-}
-
-.skin-swatch-row {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 7px;
-}
-
-.skin-swatch {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.45);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
-}
-
-.skin-card-name {
-  font-size: 0.84rem;
-  font-weight: 700;
-  color: var(--gold-bright);
-  margin-bottom: 3px;
-}
-
-.skin-card-desc {
-  font-size: 0.7rem;
-  color: var(--muted);
-  line-height: 1.32;
-  margin-bottom: 8px;
-  min-height: 2.6em;
-}
-
-.skin-card-status {
-  margin-top: auto;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #f8fafc;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.skin-item-card.equipped .skin-card-status {
-  background: rgba(16, 185, 129, 0.22);
-  color: #6ee7b7;
-}
-
-.skin-detail-panel {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: rgba(10, 13, 22, 0.88);
-  border: 1px solid rgba(212, 175, 55, 0.35);
-  text-align: left;
-  margin-bottom: 10px;
-}
-
-.skin-detail-title {
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--gold-bright);
-}
-
-.skin-detail-subtitle {
-  font-size: 0.78rem;
-  color: var(--text);
-  margin-top: 2px;
-}
-
-.skin-detail-price {
-  font-size: 0.74rem;
-  color: #6ee7b7;
-  margin-top: 4px;
-  font-weight: 600;
-}
-
-.skin-detail-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.skin-unlock-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: linear-gradient(90deg, rgba(212, 175, 55, 0.18), rgba(234, 88, 12, 0.16));
-  border: 1px solid rgba(245, 215, 110, 0.55);
-  font-size: 0.76rem;
-  color: var(--text);
-  margin-bottom: 10px;
-}
-
-@media (max-width: 768px) {
-  .skin-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .skin-detail-panel,
-  .skin-unlock-banner {
-    flex-direction: column;
-    align-items: stretch;
-    text-align: center;
-  }
-  .skin-detail-actions {
-    justify-content: center;
-  }
-  #btn-skin-shop {
-    grid-column: span 3;
-  }
 }
 
 /* =========================================================================
@@ -2103,3 +1925,23 @@ body.cinematic-ui-hidden .feedback-corner-fab {
 
 
 
+
+/* A red pulse at the screen edge when a check lands. It never covers the board itself. */
+#check-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 5;
+  background: radial-gradient(ellipse at center, rgba(255, 42, 56, 0) 62%, rgba(255, 42, 56, 0.32) 100%);
+}
+
+#check-vignette.active {
+  animation: check-vignette-pulse 0.9s ease-out 1;
+}
+
+@keyframes check-vignette-pulse {
+  0% { opacity: 0; }
+  18% { opacity: 1; }
+  100% { opacity: 0; }
+}

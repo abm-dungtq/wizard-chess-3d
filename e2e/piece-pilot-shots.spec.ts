@@ -10,7 +10,7 @@ test.use({ deviceScaleFactor: 2 });
 
 const LABEL = process.env.SHOT_LABEL || 'before';
 const OUT = 'plans/261110-0904-knight-pawn-redesign-pilot/visuals';
-const THEMES = ['hogwarts', 'jade', 'royal'];
+const THEMES = ['hogwarts'];
 // On the start squares the back rank hides the pawns, so the stills are taken after 1.e4 e5 2.Nf3 Nc6.
 const OPENING: [number, number, number, number][] = [
   [6, 4, 4, 4],
