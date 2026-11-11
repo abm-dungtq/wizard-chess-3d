@@ -217,6 +217,25 @@ export default function App() {
 
           <button
             type="button"
+            className="hud-btn top-primary-btn desktop-only-top-btn"
+            id="btn-top-cam"
+            title="Mở xoay 3D tự do hoặc khóa góc nhìn lại"
+          >
+            🎥 Xoay 3D
+          </button>
+
+          <button
+            type="button"
+            className="hud-btn top-primary-btn desktop-only-top-btn"
+            id="btn-cam-home"
+            title="Đưa camera về góc 3/4 chuẩn"
+            hidden
+          >
+            ↺<span className="cam-home-label"> Về góc chuẩn</span>
+          </button>
+
+          <button
+            type="button"
             className={`hud-btn menu-toggle-trigger ${mobileSheetOpen ? 'active' : ''}`}
             id="btn-mobile-controls"
             aria-expanded={mobileSheetOpen}
@@ -507,11 +526,11 @@ export default function App() {
           </button>
           <button
             type="button"
-            className="hud-btn mobile-dock-btn active"
+            className="hud-btn mobile-dock-btn"
             id="btn-quick-lock"
-            title="Khóa Camera Cố Định hoặc Mở Xoay 3D Tự Do"
+            title="Mở xoay 3D tự do hoặc khóa góc nhìn lại"
           >
-            🔒 Khóa
+            🎥 Xoay 3D
           </button>
           <button
             type="button"
@@ -537,6 +556,22 @@ export default function App() {
           >
             ⚔️ 2 Người
           </button>
+          <button
+            type="button"
+            className="hud-btn mobile-dock-btn"
+            id="btn-quick-home"
+            title="Đưa camera về góc 3/4 chuẩn"
+          >
+            ↺ Góc chuẩn
+          </button>
+        </div>
+      </div>
+
+      <div id="cam-guide" role="dialog" aria-labelledby="cam-guide-text" hidden>
+        <p id="cam-guide-text"></p>
+        <div className="cam-guide-actions">
+          <button type="button" className="hud-btn active" id="btn-cam-guide-try">Thử ngay</button>
+          <button type="button" className="hud-btn" id="btn-cam-guide-later">Để sau</button>
         </div>
       </div>
 

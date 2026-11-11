@@ -6406,6 +6406,7 @@ export function initWizardChess() {
       // The desktop hint pill fades out after the first move, leaving the top dock as the only HUD bar.
       document.getElementById('controls-hint')?.classList.add('is-collapsed');
       // Save board state snapshot (including pre-move scriptCursor & scriptDeviated) so Undo / Left Arrow can step backward
+      if (moveHistory.length === 0) setTimeout(maybeShowCameraGuide, 1800);
       moveHistory.push({
         snapshot: captureBoardSnapshot(),
         move: {
@@ -9739,9 +9740,13 @@ export function initWizardChess() {
       }
       const btnQuickLock = document.getElementById('btn-quick-lock');
       if (btnQuickLock) {
-        btnQuickLock.textContent = isCameraLocked ? '🔒 Khóa' : '🎥 Tự Do';
-        btnQuickLock.classList.toggle('active', isCameraLocked);
+        btnQuickLock.textContent = isCameraLocked ? '🎥 Xoay 3D' : '🔒 Khóa góc';
+        btnQuickLock.classList.toggle('active', !isCameraLocked);
       }
+      const btnTopCam = document.getElementById('btn-top-cam');
+      if (btnTopCam) btnTopCam.textContent = isCameraLocked ? '🎥 Xoay 3D' : '🔒 Khóa góc';
+      const btnCamHome = document.getElementById('btn-cam-home');
+      if (btnCamHome) btnCamHome.hidden = isCameraLocked;
       const hintEl = document.getElementById('controls-hint');
       if (hintEl) {
         hintEl.innerHTML = isCameraLocked
@@ -9770,6 +9775,66 @@ export function initWizardChess() {
       updateCameraLockUI();
       return isCameraLocked;
     }
+
+    /** Back to the 3/4 view on the side of whoever is playing, without the side flip a repeated preset click does. */
+    function returnCameraHome() {
+      spectatorCamSide = (gameMode !== 'multi' && isPassAndPlay ? currentTurn : playerColor) === 'b' ? 'b' : 'w';
+      setActiveCamButton('btn-cam-spectator');
+      const pose = getSpectatorPose(spectatorCamSide, syncResponsiveCameraFov());
+      smoothCameraTo(pose.pos, pose.lookAt, 0.75);
+    }
+
+    const CAM_GUIDE_SEEN_KEY = 'wizard_chess_cam_guide_seen';
+    const forceCamGuide = new URLSearchParams(window.location.search).get('camguide') === '1';
+    function hasSeenCameraGuide() {
+      try {
+        return localStorage.getItem(CAM_GUIDE_SEEN_KEY) === '1';
+      } catch (e) {
+        return true;
+      }
+    }
+    function closeCameraGuide() {
+      const guide = document.getElementById('cam-guide');
+      if (guide) guide.hidden = true;
+      try {
+        localStorage.setItem(CAM_GUIDE_SEEN_KEY, '1');
+      } catch (e) {}
+    }
+    /** One-time card after the first move; automated runs skip it unless they ask for it with ?camguide=1. */
+    function maybeShowCameraGuide() {
+      if (hasSeenCameraGuide() || (isAutomatedTest && !forceCamGuide)) return;
+      const guide = document.getElementById('cam-guide');
+      const text = document.getElementById('cam-guide-text');
+      if (!guide || !text || !guide.hidden) return;
+      const isTouch = Boolean(window.matchMedia?.('(pointer: coarse)')?.matches || window.innerWidth <= 768);
+      const btnTry = document.getElementById('btn-cam-guide-try');
+      const btnLater = document.getElementById('btn-cam-guide-later');
+      if (isCameraLocked) {
+        text.textContent = isTouch
+          ? 'Bàn cờ này là 3D. Bấm “🎥 Xoay 3D” để xoay, kéo để đổi góc, chụm hai ngón để phóng to.'
+          : 'Bàn cờ này là 3D. Bấm “🎥 Xoay 3D” để xoay, kéo để đổi góc, lăn chuột để phóng to.';
+        if (btnTry) btnTry.textContent = 'Thử ngay';
+        if (btnLater) btnLater.hidden = false;
+      } else {
+        text.textContent =
+          'Bàn cờ này là 3D. Kéo để đổi góc, lăn chuột để phóng to. Bấm “🔒 Khóa góc” nếu muốn giữ yên, nút ↺ để về góc chuẩn.';
+        if (btnTry) btnTry.textContent = 'Đã hiểu';
+        if (btnLater) btnLater.hidden = true;
+      }
+      guide.hidden = false;
+    }
+    document.getElementById('btn-cam-guide-try')?.addEventListener('click', () => {
+      closeCameraGuide();
+      if (isCameraLocked) setCameraLocked(false);
+    });
+    document.getElementById('btn-cam-guide-later')?.addEventListener('click', closeCameraGuide);
+    document.getElementById('btn-top-cam')?.addEventListener('click', () => {
+      setCameraLocked(!isCameraLocked);
+    });
+    document.getElementById('btn-cam-home')?.addEventListener('click', returnCameraHome);
+    document.getElementById('btn-quick-home')?.addEventListener('click', returnCameraHome);
+    // A mouse can drag to orbit without getting in the way of clicks, so desktop starts free; touch starts locked.
+    if (!isCoarseOrMobile) setCameraLocked(false);
 
     document.getElementById('mobile-quick-dock')?.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
